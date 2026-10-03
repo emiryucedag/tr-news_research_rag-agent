@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import re
 from datetime import datetime
 from ollama import chat
 
@@ -196,21 +197,38 @@ Return ONLY JSON in this exact format, nothing else:
 WRITER_SYSTEM_PROMPT = """You are a news editor. Using the list of PRE-VETTED, relevance-approved
 articles given to you, write a summary IN TURKISH that answers the user's question.
 
-STRICT RULES, follow these for EVERY SINGLE article in the list, with no exceptions even when
-the list is long:
+STRICT RULES, follow these for EVERY SINGLE article in the list, with NO EXCEPTIONS - these
+apply even when the list is long, and even when the user later asks you to revise your answer
+(a revision changes WHAT you focus on, never whether these rules apply):
 1. Write one separate paragraph or bullet per article - never merge multiple articles into one
    sentence without each getting its own link.
-2. Every single item MUST end with its own markdown link AND its publish date/time, in this
-   EXACT form: [Kaynak adı](link) - tarih: TARIH_DEGERI - copy both the link and the "tarih"
-   value exactly as given, never omit either, never invent your own date.
+2. EVERY item MUST include, in this order: (a) one sentence in your own words describing what
+   the article actually says, (b) its markdown link, (c) its publish date/time, in this exact
+   form: <your one-sentence description> [Kaynak adı](link) - tarih: TARIH_DEGERI. Never produce
+   a bare link with no description, even if the user's feedback asked you to narrow the topic -
+   narrowing the topic means including fewer articles, never stripping the description from the
+   ones you do include.
 3. Do NOT state any specific number, score, date, or quote unless that exact number/quote
-   literally appears in the article's "text" field you were given. If the "text" doesn't contain
-   a specific figure, describe the event in general terms instead of guessing a number.
-4. Do not invent any information beyond what's in the list. If the list is empty, say so clearly,
-   in Turkish."""
+   literally appears in the article's "text" field you were given. If "text" doesn't contain a
+   specific figure, describe the event in general terms instead of guessing a number.
+4. CRITICAL - never invent a result for a match/event that hasn't happened yet. If the article's
+   "text" describes an upcoming or scheduled match (words like "hazırlık maçı", "oynanacak",
+   "maçı öncesi", a future date, broadcast/watch information) rather than one that has already
+   concluded, you MUST only say that the match is scheduled (and when/where to watch, if given) -
+   NEVER state or guess a score or winner for it. Only report a result if "text" explicitly
+   describes the match as already finished (e.g. "kazandı", "mağlup oldu", "yendi", a final score
+   given in the text itself).
+5. Do not invent any information beyond what's in the list. If the list is empty, say so clearly,
+   in Turkish.
+6. CRITICAL - if the user's feedback asks for additional coverage, a specific team/person/topic,
+   or "more news about X" and NONE of the articles in your list actually cover that, you MUST
+   NOT invent a new article, source name, or link to satisfy the request. Never fabricate a
+   source that wasn't given to you. Instead, write the articles you do have, then add one
+   sentence in Turkish saying that no article matching that specific request was found in the
+   available data."""
 
 
-def write(user_question: str, findings: list[dict]) -> str:
+def write(user_question: str, findings: list[dict], feedback: str = None) -> str:
     if not findings:
         return "Bu konuyla ilgili yeterince alakalı haber bulunamadı."
 
@@ -246,6 +264,20 @@ using the "tarih" field already provided for each item:
 Write your answer in Turkish, following the strict rules from the system prompt.
 """
 
+    # If the user rejected a previous draft, append their feedback - the writer
+    # still sees the exact same vetted findings, only the instructions on HOW
+    # to present them change. Re-running the Researcher would be wasteful here:
+    # the usual rejection reason is about presentation, not wrong article choice.
+    if feedback:
+        user_message += f"""
+
+Your previous draft was rejected by the user with this feedback: "{feedback}"
+Revise your answer to address this feedback. The feedback may tell you to change WHICH
+articles to focus on, or how long/short to be - but it never overrides the strict rules
+above. In particular, every article you include must still get its own one-sentence
+description, link, and date (rule 2) - do not turn into a bare list of links.
+"""
+
     print("\n[WRITER] Synthesizing final answer from vetted findings...")
     response = chat(
         model=MODEL,
@@ -263,19 +295,150 @@ Write your answer in Turkish, following the strict rules from the system prompt.
 # the handoff ("state"). No framework needed for two sequential steps.
 # ---------------------------------------------------------------------------
 
+def refine_findings(user_question: str, findings: list[dict], feedback: str) -> list[dict]:
+    """
+    Re-evaluates the EXISTING vetted findings against the user's rejection feedback,
+    one item at a time (same batched index-based judging as the Researcher's initial
+    filter). This is deliberately a separate, narrow decision for every single item -
+    not "revise the draft" (a loose, holistic task where a model tends to only act on
+    what was explicitly named, e.g. removing "Fenerbahçe" but leaving other club-level
+    news untouched when the user actually meant "ONLY national team news"). Generic
+    across any topic/category - it never hardcodes what "national team" or similar
+    means, it just asks the model to re-apply the user's own stated criterion per item.
+    """
+    FILTER_BATCH_SIZE = 10
+    refined = []
+    batches = [findings[i:i + FILTER_BATCH_SIZE] for i in range(0, len(findings), FILTER_BATCH_SIZE)]
+
+    print(f"\n[REFINE] Re-checking {len(findings)} item(s) against feedback, in {len(batches)} batch(es)...")
+
+    for batch_num, batch in enumerate(batches, start=1):
+        slim_batch = [
+            {"index": i, "title": item["title"], "text": item["text"][:200]}
+            for i, item in enumerate(batch)
+        ]
+
+        refine_prompt = f"""Original topic: "{user_question}"
+User's additional feedback after seeing a first draft: "{feedback}"
+
+Below is a list of articles already judged relevant to the ORIGINAL topic. Decide, for
+EACH article independently, whether it should STILL be included given the feedback:
+
+- If the feedback is purely about writing style, length, or tone (not about which
+  topics/subjects to include), then KEEP every article - do not remove anything.
+- If the feedback narrows the topic (mentions a specific sub-topic, team, person, or
+  says "only X"), then an article must POSITIVELY match that narrower criterion to be
+  kept - do not keep an article just because it wasn't explicitly named as excluded.
+  Check what each article is actually about against the new, narrower criterion.
+- Judge this by the underlying meaning of the criterion, not by whether its exact
+  wording literally appears in the article's text. Consider what the article is
+  genuinely about in relation to what the user asked for, rather than performing a
+  surface-level keyword match.
+
+Articles:
+{json.dumps(slim_batch, ensure_ascii=False, indent=2)}
+
+Return ONLY JSON in this exact format, nothing else - "keep" is the list of indices to keep:
+{{"keep": [0, 2, 3]}}
+"""
+
+        response = chat(
+            model=MODEL,
+            messages=[{"role": "user", "content": refine_prompt}],
+            format="json",
+            options={"num_ctx": 8192},
+        )
+
+        try:
+            parsed = json.loads(response["message"]["content"])
+            for idx in parsed.get("keep", []):
+                if isinstance(idx, int) and 0 <= idx < len(batch):
+                    refined.append(batch[idx])
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            print(f"[REFINE] Could not parse batch {batch_num}'s output, keeping its items unchanged.")
+            refined.extend(batch)
+
+    print(f"[REFINE] {len(findings)} item(s) -> {len(refined)} kept after applying feedback")
+    return refined
+
+
+MAX_REVISIONS = 2  # safety limit - don't loop forever if the user keeps rejecting
+
+
+LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((https?://[^\)]+)\)")
+
+
+def verify_citations(answer: str, findings: list[dict]) -> list[str]:
+    """
+    Checks every link the writer cited against the links it was ACTUALLY given
+    in `findings` - not the whole news database, just this call's own vetted
+    list, since the writer should never cite anything outside what it was
+    handed. Returns any URLs found in the answer that don't match - these are
+    either fully invented sources, or a real article's content with a
+    plausible-but-wrong URL attached (seen in practice: a model reconstructing
+    a link from a domain's typical pattern instead of copying the exact string
+    it was given). Either way, a mismatch here means the citation can't be
+    trusted without a human checking it.
+    """
+    known_links = {item["link"] for item in findings}
+    cited_links = [url for _, url in LINK_PATTERN.findall(answer)]
+    return [url for url in cited_links if url not in known_links]
+
+
 def run_pipeline(user_question: str):
     refresh_index()
 
     print("\n================ RESEARCHER PHASE ================")
-    findings = research(user_question)
+    base_findings = research(user_question)  # the original, full vetted pool - never shrunk permanently
 
     print("\n================ WRITER PHASE ================")
-    final_answer = write(user_question, findings)
+    feedback_history = []  # every piece of feedback the user has given so far, in order
+    findings = base_findings
+    combined_feedback = None
 
-    print("\n--- FINAL ANSWER ---")
-    print(final_answer)
-    return final_answer
+    for attempt in range(1, MAX_REVISIONS + 2):  # +2 = first draft + up to MAX_REVISIONS redos
+        # findings decides WHICH articles are in scope (content filtering, via refine_findings
+        # below); combined_feedback is passed separately so the writer can also apply purely
+        # stylistic requests (length, tone) that don't change which articles are included.
+        answer = write(user_question, findings, feedback=combined_feedback)
+
+        print(f"\n--- DRAFT (attempt {attempt}) ---")
+        print(answer)
+
+        unverified_links = verify_citations(answer, findings)
+        if unverified_links:
+            print("\n[UYARI] Bu taslakta DOĞRULANAMAYAN link(ler) var - bunlar verilen")
+            print("kaynaklar arasında yok, modelin uydurmuş olma ihtimali var:")
+            for url in unverified_links:
+                print(f"  - {url}")
+            print("Onaylamadan önce bu link(ler)i kontrol et.")
+
+        if attempt > MAX_REVISIONS:
+            print(f"\n[PIPELINE] Reached the revision limit ({MAX_REVISIONS}) - returning this draft as final.")
+            return answer
+
+        approval = input("\nBu cevabı onaylıyor musun? (e = evet / h = hayır, düzeltme iste): ").strip().lower()
+
+        if approval == "e":
+            print("\n--- FINAL ANSWER (approved by user) ---")
+            print(answer)
+            return answer
+
+        new_feedback = input("Neyi düzeltmemi istersin? (örn. 'daha kısa yaz', 'sadece futbol olsun'): ").strip()
+        feedback_history.append(new_feedback)
+
+        # Always re-filter from the ORIGINAL, full vetted pool using the FULL feedback
+        # history combined - never chain off an already-narrowed list. This is what
+        # lets a later request like "actually, include more coverage" recover an item
+        # an earlier (possibly overly strict) narrowing step had incorrectly dropped -
+        # that item is never permanently lost, since we always start from base_findings.
+        combined_feedback = " ".join(f"({i+1}) {fb}" for i, fb in enumerate(feedback_history))
+        findings = refine_findings(user_question, base_findings, combined_feedback)
+
+        if not findings:
+            print("\n[PIPELINE] No articles remain after applying this feedback - cannot write an answer.")
+            return "Bu geri bildirime uyan haber kalmadı."
 
 
 if __name__ == "__main__":
-    run_pipeline("bana spor haberlerini ver")
+    run_pipeline("Bugün spor ile ilgili hangi haberler var, özetler misin?")

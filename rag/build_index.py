@@ -32,10 +32,18 @@ def clean_text(text):
     return text
 
 
+def turkish_lower(text):
+    """Python's default str.lower() mishandles Turkish 'İ' (dotted capital I) -
+    it turns it into 'i' + a combining dot character, not a plain 'i', which
+    silently breaks substring matching against patterns like "canlı izle".
+    Normalize the Turkish dotted/dotless I pair manually before lowering."""
+    return text.replace("İ", "i").replace("I", "ı").lower()
+
+
 def is_junk(item):
-    link = item.get("link", "").lower()
-    title = item.get("title", "").lower()
-    summary = item.get("summary", "").lower()
+    link = turkish_lower(item.get("link", ""))
+    title = turkish_lower(item.get("title", ""))
+    summary = turkish_lower(item.get("summary", ""))
     for pattern in JUNK_LINK_PATTERNS:
         if pattern in link:
             return True

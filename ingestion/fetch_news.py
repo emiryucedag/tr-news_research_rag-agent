@@ -37,8 +37,16 @@ def parse_timestamp(entry, fallback_iso):
     return int(datetime.fromisoformat(fallback_iso).timestamp())
 
 
+def turkish_lower(text):
+    """Python's default str.lower() mishandles Turkish 'İ' (dotted capital I) -
+    it turns it into 'i' + a combining dot character, not a plain 'i', which
+    silently breaks substring matching against patterns like "canlı izle".
+    Normalize the Turkish dotted/dotless I pair manually before lowering."""
+    return text.replace("İ", "i").replace("I", "ı").lower()
+
+
 def is_junk(link, title, summary):
-    link, title, summary = link.lower(), title.lower(), summary.lower()
+    link, title, summary = turkish_lower(link), turkish_lower(title), turkish_lower(summary)
     for pattern in JUNK_LINK_PATTERNS:
         if pattern in link:
             return True

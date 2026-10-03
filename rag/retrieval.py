@@ -99,7 +99,9 @@ def search_news(query: str, n_results: int = 15) -> list[dict]:
     """
     items_by_link = {}
 
-    query_lower = query.lower()
+    # Same Turkish İ/I lowercasing fix as in the ingestion/indexing junk filters -
+    # see turkish_lower() there for why plain .lower() is unsafe here too.
+    query_lower = query.replace("İ", "i").replace("I", "ı").lower()
     matched_sources = set()
     for keyword, sources in CATEGORY_SOURCES.items():
         if keyword in query_lower:
