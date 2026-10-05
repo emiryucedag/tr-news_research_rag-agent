@@ -3,7 +3,8 @@ import sys
 import re
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agents.multi_agent import research, write, verify_citations
+from observability.tracer import observe
+from agents.multi_agent import research, write, verify_citations, tracer
 
 # A handful of distinct topics/categories - broad enough to exercise the
 # category-match retrieval path, the pure-semantic path, and a mix.
@@ -61,36 +62,52 @@ def check_no_forbidden_patterns(answer):
     }
 
 
+@observe(as_type="evaluator", name="eval-scenario")
+def evaluate_scenario(question):
+    """
+    Runs one scenario end to end and returns its checks. Decorated so that each
+    scenario becomes its own trace: the researcher and writer runs nest under it,
+    and the pass/fail result is its output - which makes a failing scenario easy
+    to trace back to the exact steps that produced it.
+    """
+    findings = research(question)
+    answer = write(question, findings)
+
+    hallucination_check = check_no_hallucinated_links(answer, findings)
+    date_check = check_every_item_has_date(answer)
+    junk_check = check_no_forbidden_patterns(answer)
+
+    scenario_passed = (
+        hallucination_check["passed"]
+        and date_check["passed"]
+        and junk_check["passed"]
+    )
+
+    return {
+        "question": question,
+        "num_findings": len(findings),
+        "hallucination_check": hallucination_check,
+        "date_check": date_check,
+        "junk_check": junk_check,
+        "passed": scenario_passed,
+    }
+
+
 def run_evals():
     results = []
 
     for i, question in enumerate(SCENARIOS, start=1):
         print(f"\n{'='*70}\nSCENARIO {i}/{len(SCENARIOS)}: {question}\n{'='*70}")
 
-        findings = research(question)
-        answer = write(question, findings)
+        result = evaluate_scenario(question)
+        results.append(result)
 
-        hallucination_check = check_no_hallucinated_links(answer, findings)
-        date_check = check_every_item_has_date(answer)
-        junk_check = check_no_forbidden_patterns(answer)
+        hallucination_check = result["hallucination_check"]
+        date_check = result["date_check"]
+        junk_check = result["junk_check"]
 
-        scenario_passed = (
-            hallucination_check["passed"]
-            and date_check["passed"]
-            and junk_check["passed"]
-        )
-
-        results.append({
-            "question": question,
-            "num_findings": len(findings),
-            "hallucination_check": hallucination_check,
-            "date_check": date_check,
-            "junk_check": junk_check,
-            "passed": scenario_passed,
-        })
-
-        status = "PASS" if scenario_passed else "FAIL"
-        print(f"\n[{status}] findings={len(findings)} "
+        status = "PASS" if result["passed"] else "FAIL"
+        print(f"\n[{status}] findings={result['num_findings']} "
               f"links={hallucination_check['total_links']} "
               f"hallucinated={len(hallucination_check['hallucinated_links'])} "
               f"dates={date_check['date_count']} "
@@ -106,6 +123,8 @@ def run_evals():
     for r in results:
         status = "PASS" if r["passed"] else "FAIL"
         print(f"  [{status}] {r['question']}")
+
+    tracer.flush()
 
     return results
 

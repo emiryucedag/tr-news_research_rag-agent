@@ -6,10 +6,69 @@ from datetime import datetime
 from ollama import chat
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from observability.tracer import get_client, observe
 from rag.retrieval import search_news
 from rag.refresh import refresh_index
 
+tracer = get_client()
+
 MODEL = "qwen2.5:7b"
+
+# Settings for the JUDGING calls (relevance filter, refine). Ollama's default
+# temperature is 0.8, which makes the model SAMPLE from its probability distribution:
+# the same 38 candidates produced 11 relevant picks in one run and 14 in the next.
+# For a yes/no judgment we want the same answer every time, so we use greedy
+# decoding (temperature 0) plus a fixed seed. The writer keeps the default on purpose:
+# some variety in wording is harmless there.
+JUDGE_OPTIONS = {"num_ctx": 8192, "temperature": 0, "seed": 42}
+
+
+# ---------------------------------------------------------------------------
+# TRACING HELPERS
+# Every model call in this file goes through traced_chat(), so each one shows up
+# in the trace as its own "generation": the exact prompt sent, the raw output,
+# token counts, and latency. Everything else (agents, tool calls, retrieval,
+# checks) is wrapped with @observe, and nesting follows the call hierarchy.
+# The tracer lives in observability/tracer.py; read traces with show_trace.py.
+# ---------------------------------------------------------------------------
+
+def _plain(obj):
+    """Ollama returns pydantic Message objects; the tracer stores plain JSON-able data."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(exclude_none=True)  # drop the empty (null) fields
+    return obj
+
+
+def traced_chat(name, **kwargs):
+    """Drop-in replacement for ollama.chat() that records the call as a "generation" span."""
+    options = kwargs.get("options") or {}
+    with tracer.start_as_current_observation(
+        as_type="generation",
+        name=name,
+        model=kwargs.get("model"),
+        input=[_plain(m) for m in kwargs.get("messages", [])],
+        model_parameters={
+            "num_ctx": options.get("num_ctx", 0),
+            "temperature": options.get("temperature", "default"),
+            "json_mode": kwargs.get("format") == "json",
+        },
+    ) as generation:
+        response = chat(**kwargs)
+
+        total_s = (response.get("total_duration") or 0) / 1e9
+        load_s = (response.get("load_duration") or 0) / 1e9
+        generation.update(
+            output=_plain(response["message"]),
+            usage_details={
+                "input_tokens": response.get("prompt_eval_count") or 0,
+                "output_tokens": response.get("eval_count") or 0,
+            },
+            metadata={
+                "ollama_total_seconds": round(total_s, 2),
+                "ollama_model_load_seconds": round(load_s, 2),
+            },
+        )
+    return response
 
 # ---------------------------------------------------------------------------
 # RESEARCHER AGENT - the only one allowed to call the search tool.
@@ -52,69 +111,25 @@ TOOLS = [
 MIN_N_RESULTS = 20  # enforced floor - don't rely on the model picking a large-enough number
 
 
+@observe(as_type="retriever", name="vector-search")
+def retrieve(query, n_results):
+    """Thin wrapper so the vector search appears as its own 'retriever' step inside the tool call."""
+    return search_news(query, n_results)
+
+
+@observe(as_type="tool", name="tool-call")
 def call_tool(tool_name, tool_input):
     if tool_name == "search_news":
         query = tool_input["query"]
         requested = tool_input.get("n_results", MIN_N_RESULTS)
         n_results = max(requested, MIN_N_RESULTS)  # the model's choice can only raise this, not lower it
-        return search_news(query, n_results)
+        return retrieve(query, n_results)
     return {"error": f"Unknown tool: {tool_name}"}
 
 
-def research(user_question: str, max_steps: int = 5):
-    """
-    Step A: lets the model call search_news (ReAct loop, same as Faz 3).
-    Step B: asks the model, in a SEPARATE call with forced JSON output, to
-    judge which of the raw results are genuinely relevant.
-    Returns a clean list of vetted findings (dicts) - this is the "state"
-    handed off to the Writer agent.
-    """
-    messages = [
-        {"role": "system", "content": RESEARCHER_SYSTEM_PROMPT},
-        {"role": "user", "content": user_question},
-    ]
-
-    raw_results = []
-
-    for step in range(max_steps):
-        print(f"\n[RESEARCHER] Step {step + 1}: sending request to {MODEL}")
-        response = chat(model=MODEL, messages=messages, tools=TOOLS)
-        message = response["message"]
-
-        if not message.get("tool_calls"):
-            # Model didn't call the tool at all (rare) - nothing to research
-            print("[RESEARCHER] Model did not call the search tool.")
-            break
-
-        messages.append(message)
-
-        for tool_call in message["tool_calls"]:
-            tool_name = tool_call["function"]["name"]
-            tool_input = tool_call["function"]["arguments"]
-            print(f"[RESEARCHER] [TOOL_USE] {tool_name}({tool_input})")
-
-            result = call_tool(tool_name, tool_input)
-            raw_results.extend(result)  # keep accumulating across every search round
-            messages.append({"role": "tool", "content": json.dumps(result, ensure_ascii=False)})
-
-        # NOTE: no forced break here anymore - the loop goes back to the top,
-        # lets the model see its own search history, and decide on its own
-        # whether to search again (e.g. with a different sub-query) or stop.
-        # The "if not message.get('tool_calls')" check above is what ends it.
-
-    if not raw_results:
-        return []
-
-    # The same article can come back from more than one sub-query - dedupe by link
-    # before handing results to the filtering step, so we don't judge/count it twice.
-    seen_links = set()
-    deduped_results = []
-    for item in raw_results:
-        if item["link"] not in seen_links:
-            seen_links.add(item["link"])
-            deduped_results.append(item)
-    raw_results = deduped_results
-
+@observe(name="relevance-filter")
+def filter_candidates(user_question: str, raw_results: list[dict]) -> list[dict]:
+    """Step B of the researcher: judge which retrieved candidates are genuinely relevant."""
     # --- Step B: explicit, structured-output filtering, done in small BATCHES ---
     #
     # Asking a 7B model to judge 30+ articles in one pass tends to suffer from
@@ -165,11 +180,12 @@ Return ONLY JSON in this exact format, nothing else:
 """
 
         print(f"[RESEARCHER] Filtering batch {batch_num}/{len(batches)} ({len(batch)} item(s))...")
-        filter_response = chat(
+        filter_response = traced_chat(
+            f"relevance-filter-batch-{batch_num}",
             model=MODEL,
             messages=[{"role": "user", "content": filter_prompt}],
             format="json",
-            options={"num_ctx": 8192},
+            options=JUDGE_OPTIONS,
         )
 
         raw_output = filter_response["message"]["content"]
@@ -186,7 +202,71 @@ Return ONLY JSON in this exact format, nothing else:
             print(f"[RESEARCHER] Could not parse batch {batch_num}'s output, skipping this batch.")
 
     print(f"[RESEARCHER] {len(raw_results)} raw result(s) -> {len(findings)} judged relevant (across {len(batches)} batch(es))")
+    tracer.update_current_span(
+        metadata={"candidates": len(raw_results), "judged_relevant": len(findings), "batches": len(batches)}
+    )
     return findings
+
+
+@observe(as_type="agent", name="researcher")
+def research(user_question: str, max_steps: int = 1):
+    """
+    Step A: lets the model call search_news. max_steps is the number of model<->tool
+    rounds; the default is ONE round (see the note inside the loop for why).
+    Step B: asks the model, in a SEPARATE call with forced JSON output, to
+    judge which of the raw results are genuinely relevant.
+    Returns a clean list of vetted findings (dicts) - this is the "state"
+    handed off to the Writer agent.
+    """
+    messages = [
+        {"role": "system", "content": RESEARCHER_SYSTEM_PROMPT},
+        {"role": "user", "content": user_question},
+    ]
+
+    raw_results = []
+
+    for step in range(max_steps):
+        print(f"\n[RESEARCHER] Step {step + 1}: sending request to {MODEL}")
+        response = traced_chat(f"researcher-step-{step + 1}", model=MODEL, messages=messages, tools=TOOLS)
+        message = response["message"]
+
+        if not message.get("tool_calls"):
+            # Model didn't call the tool at all (rare) - nothing to research
+            print("[RESEARCHER] Model did not call the search tool.")
+            break
+
+        messages.append(message)
+
+        for tool_call in message["tool_calls"]:
+            tool_name = tool_call["function"]["name"]
+            tool_input = tool_call["function"]["arguments"]
+            print(f"[RESEARCHER] [TOOL_USE] {tool_name}({tool_input})")
+
+            result = call_tool(tool_name, tool_input)
+            raw_results.extend(result)  # keep accumulating across every search round
+            messages.append({"role": "tool", "content": json.dumps(result, ensure_ascii=False)})
+
+        # With max_steps=1 the loop ends right here, after the tools ran, without asking
+        # the model again. We used to let it go round once more so it could issue
+        # follow-up searches, but traces showed that second model call (~30s) never
+        # produced a new tool call: its answer was thrown away every single time.
+        # Raise max_steps to bring follow-up rounds back. (The model can still request
+        # several searches in ONE response - message["tool_calls"] is a list.)
+
+    if not raw_results:
+        return []
+
+    # The same article can come back from more than one sub-query - dedupe by link
+    # before handing results to the filtering step, so we don't judge/count it twice.
+    seen_links = set()
+    deduped_results = []
+    for item in raw_results:
+        if item["link"] not in seen_links:
+            seen_links.add(item["link"])
+            deduped_results.append(item)
+    raw_results = deduped_results
+
+    return filter_candidates(user_question, raw_results)
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +308,7 @@ apply even when the list is long, and even when the user later asks you to revis
    available data."""
 
 
+@observe(as_type="agent", name="writer")
 def write(user_question: str, findings: list[dict], feedback: str = None) -> str:
     if not findings:
         return "Bu konuyla ilgili yeterince alakalı haber bulunamadı."
@@ -279,7 +360,8 @@ description, link, and date (rule 2) - do not turn into a bare list of links.
 """
 
     print("\n[WRITER] Synthesizing final answer from vetted findings...")
-    response = chat(
+    response = traced_chat(
+        "writer-draft",
         model=MODEL,
         messages=[
             {"role": "system", "content": WRITER_SYSTEM_PROMPT},
@@ -295,6 +377,7 @@ description, link, and date (rule 2) - do not turn into a bare list of links.
 # the handoff ("state"). No framework needed for two sequential steps.
 # ---------------------------------------------------------------------------
 
+@observe(name="refine-findings")
 def refine_findings(user_question: str, findings: list[dict], feedback: str) -> list[dict]:
     """
     Re-evaluates the EXISTING vetted findings against the user's rejection feedback,
@@ -342,11 +425,12 @@ Return ONLY JSON in this exact format, nothing else - "keep" is the list of indi
 {{"keep": [0, 2, 3]}}
 """
 
-        response = chat(
+        response = traced_chat(
+            f"refine-batch-{batch_num}",
             model=MODEL,
             messages=[{"role": "user", "content": refine_prompt}],
             format="json",
-            options={"num_ctx": 8192},
+            options=JUDGE_OPTIONS,
         )
 
         try:
@@ -368,6 +452,7 @@ MAX_REVISIONS = 2  # safety limit - don't loop forever if the user keeps rejecti
 LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((https?://[^\)]+)\)")
 
 
+@observe(as_type="guardrail", name="citation-check")
 def verify_citations(answer: str, findings: list[dict]) -> list[str]:
     """
     Checks every link the writer cited against the links it was ACTUALLY given
@@ -385,8 +470,11 @@ def verify_citations(answer: str, findings: list[dict]) -> list[str]:
     return [url for url in cited_links if url not in known_links]
 
 
+@observe(as_type="chain", name="news-agent-pipeline")
 def run_pipeline(user_question: str):
-    refresh_index()
+    with tracer.start_as_current_observation(as_type="span", name="refresh-index") as refresh_span:
+        added = refresh_index()
+        refresh_span.update(output={"new_articles_indexed": added})
 
     print("\n================ RESEARCHER PHASE ================")
     base_findings = research(user_question)  # the original, full vetted pool - never shrunk permanently
@@ -407,24 +495,24 @@ def run_pipeline(user_question: str):
 
         unverified_links = verify_citations(answer, findings)
         if unverified_links:
-            print("\n[UYARI] Bu taslakta DOĞRULANAMAYAN link(ler) var - bunlar verilen")
-            print("kaynaklar arasında yok, modelin uydurmuş olma ihtimali var:")
+            print("\n[WARNING] This draft cites link(s) that are NOT in the list of sources")
+            print("the writer was given - the model may have invented or reconstructed them:")
             for url in unverified_links:
                 print(f"  - {url}")
-            print("Onaylamadan önce bu link(ler)i kontrol et.")
+            print("Check these before approving.")
 
         if attempt > MAX_REVISIONS:
             print(f"\n[PIPELINE] Reached the revision limit ({MAX_REVISIONS}) - returning this draft as final.")
             return answer
 
-        approval = input("\nBu cevabı onaylıyor musun? (e = evet / h = hayır, düzeltme iste): ").strip().lower()
+        approval = input("\nDo you approve this answer? (y = yes / n = no, request revision): ").strip().lower()
 
-        if approval == "e":
+        if approval == "y":
             print("\n--- FINAL ANSWER (approved by user) ---")
             print(answer)
             return answer
 
-        new_feedback = input("Neyi düzeltmemi istersin? (örn. 'daha kısa yaz', 'sadece futbol olsun'): ").strip()
+        new_feedback = input("What do you want me to fix? (e.g., 'write more briefly', 'only keep football news'): ").strip()
         feedback_history.append(new_feedback)
 
         # Always re-filter from the ORIGINAL, full vetted pool using the FULL feedback
@@ -441,4 +529,9 @@ def run_pipeline(user_question: str):
 
 
 if __name__ == "__main__":
-    run_pipeline("Bugün spor ile ilgili hangi haberler var, özetler misin?")
+    try:
+        run_pipeline("Bugün spor ile ilgili hangi haberler var, özetler misin?")
+    finally:
+        # No-op for this tracer (the trace file is written when the root span closes).
+        # Kept so switching to a background-exporting backend needs no code change.
+        tracer.flush()
