@@ -5,3 +5,5 @@ chroma_db/
 traces/
 supabase/.temp/
 supabase/.branches/
+backend/.env
+backend/ingestion/news_data.json
