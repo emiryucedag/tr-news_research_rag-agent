@@ -49,7 +49,7 @@ def main():
 
     loaded = load_filter_input(args.which)
     if loaded is None:
-        print("No usable trace found. Run the pipeline once first (python3 agents/multi_agent_ollama.py).")
+        print("No usable trace found. Run the pipeline once first (python3 agents/multi_agent.py).")
         return
     trace_name, question, raw_results = loaded
     titles = {item["link"]: item["title"] for item in raw_results}

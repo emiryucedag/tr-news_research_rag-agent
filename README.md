@@ -1,13 +1,79 @@
 # Turkish News Research Agent
 
-A local, fully free-to-run system that researches and summarizes current Turkish news
-on any topic the user asks about. It combines a retrieval-augmented generation (RAG)
-pipeline with a multi-agent architecture to find, filter, write, and verify a
-source-cited answer, with a human review step before anything is treated as final
-and a trace of every run that can be inspected afterwards.
+A free-to-run system that researches and summarizes current news (Turkish and English
+sources, Turkish output) with source-cited answers. It is being built in two stages:
 
-Everything runs on-device through [Ollama](https://ollama.com). No paid API key and
-no external service is required.
+1. **v1, a local command-line agent** (git tag `v1-cli`): RSS, a local vector store, a
+   researcher and a writer agent on a local model, a human review step and tracing.
+   Documented in the second half of this file.
+2. **A free web app** (branch `web-app`, in progress): category tabs refreshed hourly
+   without any model call, plus a chat limited to a few questions per user per day.
+
+## Web app (in progress)
+
+Goal: users pick a category (politics, sports, economy, technology, world, AI, pop
+culture, general news) and read hourly-refreshed summaries; inside the app they can
+also ask a chatbot about a specific topic. Access is by invitation (about ten users,
+10 chat questions per user per day), plus one trial question per day for guests.
+Everything uses free tiers only.
+
+```
+GitHub Actions (hourly)                         Supabase                       Browser
+RSS feeds -> filter -> store -> embed  ->  Postgres + pgvector  <-  Edge Function "ask"
+                                           (articles, 3-day window)  question -> embedding
+                                                                     -> vector search
+                                                                     -> one Gemini call
+                                                                     -> answer
+```
+
+- **Ingestion** (`backend/jobs/`): 41 feeds in 8 categories. Junk and duplicates are
+  dropped, one feed's wrong timezone label is corrected, and rows older than three days
+  are deleted. Everything is stored; only as many articles as the embedding budget
+  allows are embedded per run (round-robin across categories, newest first).
+- **Chat path** (`supabase/functions/ask/`): the question is embedded, the 12 nearest
+  articles are fetched with pgvector, and one model call selects the relevant ones. The
+  model only sees numbered candidates and returns `[{n, sentence}]`; links, dates and
+  source names are filled in by code, so the model cannot corrupt or invent them. Any
+  failure falls back to a plain list of titles and links.
+- **Database** (`supabase/migrations/`): `articles` with a 768-dimension embedding,
+  row level security on and no public policies; only the server side can read or write.
+
+What was measured on a 50-article table with `gemini-3.5-flash-lite`:
+
+- A question took 1.2 to 2.0 seconds warm and 2.3 seconds on the first call, using
+  exactly two model requests (one embedding, one generation). The v1 pipeline took about
+  four minutes and five or more model calls.
+- An unrelated question returned no results instead of invented ones. Two generated
+  sentences that contained specific facts were checked against their sources and matched.
+- Similarity scores alone do not separate relevant from irrelevant articles well
+  (about 0.62 for a relevant story versus 0.57 for an unrelated query), which is why
+  the model makes the final selection.
+
+Free-tier limits that shaped the design (measured, not assumed):
+
+- Every text in a batch embedding call counts as one request: 100 per minute and about
+  1,000 per day per model. The job therefore embeds at most 35 articles per hourly run
+  and at most 850 per rolling 24 hours, tracked in the database. Articles without an
+  embedding still appear in category views but are not searchable in chat.
+- The generation model has about 500 requests per day; summaries and chat share it.
+
+Content policy: only titles and the short feed summaries are stored, for three days; no
+article text or images; every answer links back to the source. Scraped data is not
+committed to this repository. Each feed carries a flag for whether its publisher's terms
+of use have been checked.
+
+Status: database schema, the `ask` function (spike) and the hourly ingestion job are
+done. Still to do: scheduled run on GitHub Actions, cached category summaries,
+invitation login with per-user quotas, the web interface, and evaluations of the new
+query path.
+
+---
+
+# v1: local command-line agent
+
+Everything below documents the v1 agent (tag `v1-cli`). It runs on-device through
+[Ollama](https://ollama.com) with no paid API key. Run its commands from the `backend/`
+directory.
 
 ## What it does
 
@@ -191,24 +257,34 @@ python3 observability/show_trace.py 1 --span writer  # full prompt and output of
 
 ```
 news-agent/
-├── ingestion/
-│   ├── fetch_news.py          # RSS fetching, dedup, junk filtering
-│   └── news_data.json         # raw article store
-├── rag/
-│   ├── build_index.py         # full and incremental vector index builds
-│   ├── retrieval.py           # semantic + category-based retrieval
-│   └── refresh.py             # fetch + index update, run before every query
-├── agents/
-│   └── multi_agent_ollama.py  # researcher + writer pipeline, review loop, citation check
-├── observability/
-│   ├── tracer.py              # trace / span / generation recording
-│   └── show_trace.py          # list traces, render span trees, dump a step's prompt
-├── evals/
-│   ├── run_evals.py           # automated scenario checks (citations, dates, junk regressions)
-│   └── check_determinism.py   # repeatability check for the relevance filter
-├── traces/                    # created at runtime, ignored by git
-└── requirements.txt
+├── backend/
+│   ├── ingestion/
+│   │   └── fetch_news.py         # v1: RSS fetching, dedup, junk filtering
+│   ├── rag/
+│   │   ├── build_index.py        # v1: full and incremental vector index builds
+│   │   ├── retrieval.py          # v1: semantic + category-based retrieval
+│   │   └── refresh.py            # v1: fetch + index update, run before every query
+│   ├── agents/
+│   │   └── multi_agent.py        # v1: researcher + writer pipeline, review loop, citation check
+│   ├── observability/
+│   │   ├── tracer.py             # trace / span / generation recording
+│   │   └── show_trace.py         # list traces, render span trees, dump a step's prompt
+│   ├── evals/
+│   │   ├── run_evals.py          # automated scenario checks (citations, dates, junk regressions)
+│   │   └── check_determinism.py  # repeatability check for the relevance filter
+│   ├── jobs/                     # web app: hourly ingestion (feeds.py, ingest.py, common.py)
+│   ├── spike/                    # web app: throwaway scripts from the architecture spike
+│   ├── traces/                   # created at runtime, ignored by git
+│   └── requirements.txt          # v1 dependencies (the jobs have their own list)
+├── supabase/
+│   ├── migrations/               # database schema
+│   └── functions/ask/            # chat Edge Function
+├── .github/workflows/            # scheduled jobs
+└── HANDOFF.md                    # working notes for continuing the project
 ```
+
+Scraped article data (`backend/ingestion/news_data.json`) is created locally by the
+fetch step and is not tracked by git.
 
 ## Setup
 
@@ -219,7 +295,8 @@ cd <repo-name>
 python3 -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
+cd backend
 
 # Install Ollama from https://ollama.com, then pull the model:
 ollama pull qwen2.5:7b
@@ -228,10 +305,10 @@ ollama pull qwen2.5:7b
 ## Usage
 
 ```bash
-python3 agents/multi_agent_ollama.py
+python3 agents/multi_agent.py
 ```
 
-Edit the question at the bottom of `multi_agent_ollama.py`, or import `run_pipeline()`
+Edit the question at the bottom of `multi_agent.py`, or import `run_pipeline()`
 from your own script. The pipeline will show you a draft and ask for approval; you
 can reject it with free-text feedback (e.g. "only football news", "write more
 briefly") and it will revise accordingly, up to a small revision limit. When the run
