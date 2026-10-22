@@ -1,5 +1,5 @@
 .env
 __pycache__/
 *.pyc
-rag/chroma_db/
+chroma_db/
 traces/
