@@ -152,7 +152,7 @@ def main():
         results = list(pool.map(fetch_feed, feed_order(FEEDS)))
     rows, stats = build_rows(results, now, args.retention_days)
 
-    failed = [n for n, s in stats.items() if s["error"]]
+    failed = {n: s["error"] for n, s in stats.items() if s["error"]}
     print(f"feeds: {len(FEEDS) - len(failed)} ok, {len(failed)} failed {failed if failed else ''}")
     existing = {r["id"] for r in db.select_all("articles", {"select": "id"})}
     new_rows = [r for r in rows if r["id"] not in existing]
