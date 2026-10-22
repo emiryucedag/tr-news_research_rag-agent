@@ -17,7 +17,11 @@ permissions:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
     steps:
       - uses: actions/checkout@v7
 
@@ -29,10 +33,10 @@ jobs:
 
       - run: pip install -r backend/jobs/requirements.txt
 
-      - name: Run ingestion
+      - name: Fetch feeds, store and embed
         working-directory: backend
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: python jobs/ingest.py
+
+      - name: Build category summaries
+        working-directory: backend
+        run: python jobs/summarize.py

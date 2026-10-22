@@ -1,6 +1,7 @@
 """Helpers shared by the scheduled jobs: config, text cleaning, Supabase REST, Gemini embeddings."""
 import hashlib
 import html
+import json
 import os
 import re
 from pathlib import Path
@@ -103,17 +104,17 @@ class Supabase:
             params={**params, "select": "id", "limit": 1}))
         return int(r.headers["content-range"].split("/")[1])
 
-    def insert_ignore(self, table, rows, chunk=200):
+    def insert_ignore(self, table, rows, chunk=200, conflict="id"):
         for i in range(0, len(rows), chunk):
             self._check(self.client.post(
-                f"{self.url}/{table}", params={"on_conflict": "id"},
+                f"{self.url}/{table}", params={"on_conflict": conflict},
                 headers={**self.headers, "Prefer": "resolution=ignore-duplicates,return=minimal"},
                 json=rows[i:i + chunk]))
 
-    def upsert(self, table, rows, chunk=100):
+    def upsert(self, table, rows, chunk=100, conflict="id"):
         for i in range(0, len(rows), chunk):
             self._check(self.client.post(
-                f"{self.url}/{table}", params={"on_conflict": "id"},
+                f"{self.url}/{table}", params={"on_conflict": conflict},
                 headers={**self.headers, "Prefer": "resolution=merge-duplicates,return=minimal"},
                 json=rows[i:i + chunk]))
 
@@ -151,3 +152,33 @@ def embed_documents(texts):
 def vector_literal(vec):
     """pgvector text format."""
     return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
+
+
+# --- Gemini generation ------------------------------------------------------
+
+# Primary first, then a second model with its own free-tier quota.
+GENERATION_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+
+
+class GenerationError(Exception):
+    pass
+
+
+def generate_json(model, prompt, schema):
+    """One generateContent request that must return JSON matching `schema`."""
+    r = httpx.post(
+        f"{GEMINI_URL}/{model}:generateContent",
+        headers={"x-goog-api-key": get_env("GEMINI_API_KEY")},
+        json={"contents": [{"parts": [{"text": prompt}]}],
+              "generationConfig": {"responseMimeType": "application/json",
+                                   "responseSchema": schema, "temperature": 0}},
+        timeout=120)
+    if r.status_code != 200:
+        msg = r.json().get("error", {}).get("message", "")[:120] if r.headers.get("content-type", "").startswith("application/json") else ""
+        raise GenerationError(f"{model} HTTP {r.status_code} {msg}")
+    parts = r.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
+    text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+    try:
+        return json.loads(text)
+    except ValueError:
+        raise GenerationError(f"{model} returned invalid JSON")

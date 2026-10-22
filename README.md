@@ -30,6 +30,12 @@ RSS feeds -> filter -> store -> embed  ->  Postgres + pgvector  <-  Edge Functio
   dropped, one feed's wrong timezone label is corrected, and rows older than three days
   are deleted. Everything is stored; only as many articles as the embedding budget
   allows are embedded per run (round-robin across categories, newest first).
+- **Category summaries** (`backend/jobs/summarize.py`): for each category, one model call
+  picks up to 8 distinct stories from the last 48 hours and writes one Turkish sentence
+  per story. Links, sources and dates come from the database. A code check rejects any
+  sentence containing a number that is not in the source text, a category is skipped when
+  its candidate set has not changed, and the fallback is a plain list of titles. The web
+  app reads the stored result and never calls a model for a tab.
 - **Chat path** (`supabase/functions/ask/`): the question is embedded, the 12 nearest
   articles are fetched with pgvector, and one model call selects the relevant ones. The
   model only sees numbered candidates and returns `[{n, sentence}]`; links, dates and
@@ -62,8 +68,8 @@ article text or images; every answer links back to the source. Scraped data is n
 committed to this repository. Each feed carries a flag for whether its publisher's terms
 of use have been checked.
 
-Status: database schema, the `ask` function (spike) and the hourly ingestion job are
-done. Still to do: scheduled run on GitHub Actions, cached category summaries,
+Status: database schema, the `ask` function (spike), the hourly ingestion job and the
+cached category summaries are done and run hourly on GitHub Actions. Still to do:
 invitation login with per-user quotas, the web interface, and evaluations of the new
 query path.
 
