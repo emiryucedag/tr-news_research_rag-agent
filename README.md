@@ -279,8 +279,7 @@ news-agent/
 ├── supabase/
 │   ├── migrations/               # database schema
 │   └── functions/ask/            # chat Edge Function
-├── .github/workflows/            # scheduled jobs
-└── HANDOFF.md                    # working notes for continuing the project
+└── .github/workflows/            # scheduled jobs
 ```
 
 Scraped article data (`backend/ingestion/news_data.json`) is created locally by the
