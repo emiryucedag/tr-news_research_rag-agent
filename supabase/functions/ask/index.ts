@@ -348,7 +348,9 @@ Deno.serve(async (req) => {
         sentence,
         title: a.title,
         source: a.source,
+        language: a.language,
         date: formatDate(a.published_at),
+        published_at: a.published_at,
         link: a.link,
       });
     }

@@ -102,6 +102,13 @@ Free-tier limits that shaped the design (measured, not assumed):
   embedding still appear in category views but are not searchable in chat.
 - The generation model has about 500 requests per day; summaries and chat share it.
 
+The interface is a plain static page designed like a newspaper front page: a serif headline
+face (Newsreader) and a sans face for interface text (IBM Plex Sans), both self-hosted so
+visitors' browsers do not contact a font service, hairline rules instead of cards, one accent
+colour, a lead story with secondary ones below it, relative times, an "EN" badge on stories
+translated from English, and chat answers written as a paragraph with numbered footnotes. It
+follows the system light or dark setting and works at phone width.
+
 Content policy: only titles and the short feed summaries are stored, for three days; no
 article text or images; every answer links back to the source. Scraped data is not
 committed to this repository. Each feed carries a flag for whether its publisher's terms
@@ -328,7 +335,7 @@ news-agent/
 ├── supabase/
 │   ├── migrations/               # database schema
 │   └── functions/ask/            # chat Edge Function
-├── web/                          # static site: login, category tabs, chat
+├── web/                          # static site: front page per section, chat (fonts/ is self-hosted)
 └── .github/workflows/            # hourly jobs and the Pages deployment
 ```
 

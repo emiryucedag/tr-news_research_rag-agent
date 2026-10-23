@@ -1,0 +1,11 @@
+Fonts in this folder
+
+  Newsreader      Copyright the Newsreader Project Authors (Production Type).
+  IBM Plex Sans   Copyright IBM Corp.
+
+Both are licensed under the SIL Open Font License, Version 1.1, which permits use, copying
+and redistribution, including on websites, free of charge. The full license text is at
+https://openfontlicense.org/open-font-license-official-text/
+
+The files were taken from the Fontsource distribution (https://fontsource.org) and are
+served from this site so that visitors' browsers do not contact a third party for fonts.

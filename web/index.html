@@ -5,60 +5,74 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Haber Özeti</title>
   <meta name="description" content="Kategorilere göre saatlik haber özetleri ve haberler hakkında soru sorabileceğin bir sohbet.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="preload" href="fonts/newsreader-latin-600.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="top">
-    <h1>Haber Özeti</h1>
-    <div id="account">
-      <button id="login-toggle" type="button" class="link-button" aria-expanded="false" aria-controls="login-panel">Giriş yap</button>
-      <span id="account-email" hidden></span>
-      <button id="logout" type="button" class="link-button" hidden>Çıkış</button>
+  <a class="skip-link" href="#content">İçeriğe geç</a>
+
+  <header class="masthead">
+    <div class="masthead-top">
+      <span class="dateline" id="dateline"></span>
+      <div id="account">
+        <button id="login-toggle" type="button" class="link-button" aria-expanded="false" aria-controls="login-panel">Giriş yap</button>
+        <span id="account-email" hidden></span>
+        <button id="logout" type="button" class="link-button" hidden>Çıkış</button>
+      </div>
     </div>
+    <h1 class="nameplate">Haber Özeti</h1>
   </header>
 
-  <main>
-    <!-- Opened from the header button; the page itself needs no login. -->
-    <section id="login-panel" hidden>
-      <h2>Giriş</h2>
-      <p class="muted">Davetli kullanıcılar giriş yaparak günde 10 soru sorabilir.</p>
-      <form id="login-form">
-        <label>E-posta <input id="login-email" type="email" autocomplete="email" required></label>
-        <label>Şifre <input id="login-password" type="password" autocomplete="current-password" required></label>
-        <button type="submit" id="login-submit">Giriş yap</button>
-        <p id="login-error" class="error" role="alert" hidden></p>
-      </form>
+  <div class="page">
+    <nav id="tabs" aria-label="Bölümler"></nav>
 
-      <h2>Davet iste</h2>
-      <p class="muted">E-posta adresini bırak. Uygun görülürse davet e-postası alırsın ve şifreni kendin belirlersin. Şifre istemiyoruz.</p>
-      <form id="invite-form">
-        <label>E-posta <input id="invite-email" type="email" autocomplete="email" required maxlength="254"></label>
-        <label>Kısa not (isteğe bağlı) <input id="invite-note" type="text" maxlength="300"></label>
-        <!-- Bot trap: people never see or fill this field. -->
-        <input id="invite-website" class="trap" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
-        <button type="submit" id="invite-submit">Davet iste</button>
-        <p id="invite-message" class="muted" role="status" hidden></p>
-      </form>
-    </section>
+    <main class="content" id="content">
+      <!-- Opened from the header button; the page itself needs no login. -->
+      <section id="login-panel" hidden>
+        <h2>Giriş</h2>
+        <p class="muted">Davetli kullanıcılar giriş yaparak günde 10 soru sorabilir.</p>
+        <form id="login-form">
+          <label>E-posta <input id="login-email" type="email" autocomplete="email" required></label>
+          <label>Şifre <input id="login-password" type="password" autocomplete="current-password" required></label>
+          <button type="submit" id="login-submit">Giriş yap</button>
+          <p id="login-error" class="error" role="alert" hidden></p>
+        </form>
 
-    <nav id="tabs" aria-label="Kategoriler"></nav>
-    <div id="summary" aria-live="polite"></div>
+        <h2>Davet iste</h2>
+        <p class="muted">E-posta adresini bırak. Uygun görülürse davet e-postası alırsın ve şifreni kendin belirlersin. Şifre istemiyoruz.</p>
+        <form id="invite-form">
+          <label>E-posta <input id="invite-email" type="email" autocomplete="email" required maxlength="254"></label>
+          <label>Kısa not (isteğe bağlı) <input id="invite-note" type="text" maxlength="300"></label>
+          <!-- Bot trap: people never see or fill this field. -->
+          <input id="invite-website" class="trap" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+          <button type="submit" id="invite-submit">Davet iste</button>
+          <p id="invite-message" class="muted" role="status" hidden></p>
+        </form>
+      </section>
 
-    <section id="chat">
-      <h2>Habere soru sor</h2>
-      <p class="muted" id="chat-scope"></p>
-      <form id="chat-form">
-        <textarea id="chat-input" rows="2" maxlength="300" required
-                  placeholder="Örnek: Merkez Bankası faiz kararı ne oldu?"></textarea>
-        <button type="submit" id="chat-submit">Sor</button>
-      </form>
-      <p id="chat-quota" class="muted"></p>
-      <div id="chat-answer" aria-live="polite"></div>
-    </section>
-  </main>
+      <div class="section-head">
+        <h2 id="section-title"></h2>
+        <p id="section-updated"></p>
+      </div>
+      <div id="summary" aria-live="polite"></div>
+
+      <section id="chat">
+        <h2>Habere soru sor</h2>
+        <p class="muted" id="chat-scope"></p>
+        <form id="chat-form">
+          <textarea id="chat-input" rows="2" maxlength="300" required aria-label="Sorun"
+                    placeholder="Örnek: Merkez Bankası faiz kararı ne oldu?"></textarea>
+          <button type="submit" id="chat-submit">Sor</button>
+        </form>
+        <p id="chat-quota"></p>
+        <div id="chat-answer" aria-live="polite"></div>
+      </section>
+    </main>
+  </div>
 
   <footer>
-    <p>Özetleri yapay zekâ yazar ve hatalı olabilir; ayrıntı için kaynak bağlantısına bak. Sohbet yalnızca son 3 günün haberlerini kapsar, tüm interneti değil.</p>
+    <p>Özetleri yapay zekâ yazar ve hatalı olabilir; ayrıntı için kaynak bağlantısına bak. İngilizce kaynakların özetleri Türkçeye çevrilmiştir ve "EN" ile işaretlidir. Sohbet yalnızca son 3 günün haberlerini kapsar, tüm interneti değil.</p>
     <p>Sorular ve haber başlıkları Google Gemini'ye (ücretsiz katman) gönderilir; Google bu içeriği ürünlerini geliştirmek için kullanabilir.</p>
   </footer>
 
