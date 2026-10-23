@@ -192,7 +192,7 @@ svg { display: block; flex: none; }
 .note { margin: 14px 0; color: var(--soft); }
 .error { color: var(--warn); font-weight: 600; }
 
-.stories.reveal .story { animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; animation-delay: calc(min(var(--i), 6) * 40ms); }
+.stories.reveal .story, .strip.reveal .story { animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; animation-delay: calc(min(var(--i), 6) * 40ms); }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 .skeleton { display: grid; gap: 12px; margin-top: 20px; padding: 28px; border-radius: var(--r-card); background: var(--card); }
@@ -202,6 +202,40 @@ svg { display: block; flex: none; }
 .skeleton span:nth-child(2) { width: 60%; height: 2.2rem; }
 .skeleton span:nth-child(3) { width: 40%; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+/* Flow switch (top right) and the horizontal flow ----------------------------------------------- */
+
+.seg { display: inline-flex; padding: 2px; border-radius: 999px; background: var(--sunk); }
+.seg button { display: grid; place-items: center; width: 40px; height: 36px; border: 0; border-radius: 999px; background: transparent; color: var(--soft); }
+.seg button svg { width: 18px; height: 18px; }
+.seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); }
+.seg button:active { transform: scale(0.95); }
+
+.strip-wrap { position: relative; margin-top: 32px; }
+.strip { display: flex; gap: 16px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scroll-padding-inline: var(--gutter);
+  margin: 0 calc(var(--gutter) * -1); padding: 4px var(--gutter) 16px; scrollbar-width: none; }
+.strip::-webkit-scrollbar { display: none; }
+.strip > .story { flex: 0 0 min(84vw, 21rem); scroll-snap-align: start; }
+.strip > .story.lead { flex-basis: min(90vw, 30rem); padding: 28px; border-top-width: 4px; }
+.strip > .story.lead .headline { font-size: clamp(1.75rem, 5vw, 2.4rem); }
+.strip > .story.lead .dek { font-size: 1.1875rem; }
+.strip:focus-visible { outline-offset: -2px; }
+@media (min-width: 46rem) {
+  .strip { margin: 0; padding-inline: 0; scroll-padding-inline: 0; }
+}
+@media (max-width: 45.99rem) {
+  .masthead { position: static; }   /* two rows of controls would cover too much of a phone screen */
+}
+.strip-arrow { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .strip-arrow { position: absolute; top: calc(50% - 22px); z-index: 2; display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line);
+    border-radius: 50%; background: var(--card); color: var(--ink); }
+  .strip-arrow:hover { border-color: var(--soft); }
+  .strip-arrow:active { transform: scale(0.95); }
+  .strip-arrow svg { width: 20px; height: 20px; }
+  .strip-arrow.prev { left: -22px; }
+  .strip-arrow.next { right: -22px; }
+}
 
 /* Buttons and forms: pills for actions ------------------------------------------------------ */
 
@@ -308,6 +342,6 @@ dialog[open] .sheet { animation: sheet-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); 
 .sheet h3 { font-size: 1rem; }
 
 @media (prefers-reduced-motion: reduce) {
-  .stories.reveal .story, dialog[open] .sheet, .skeleton span, .steps li:last-child::before { animation: none; }
+  .stories.reveal .story, .strip.reveal .story, dialog[open] .sheet, .skeleton span, .steps li:last-child::before { animation: none; }
   .btn:active, .topic:active, .story:active, .rail-tab:active, .icon-btn:active { transform: none; }
 }
