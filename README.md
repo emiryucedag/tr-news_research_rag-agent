@@ -59,6 +59,34 @@ What was measured on a 50-article table with `gemini-3.5-flash-lite`:
   (about 0.62 for a relevant story versus 0.57 for an unrelated query), which is why
   the model makes the final selection.
 
+### Evaluating the web query path
+
+`backend/evals/eval_web.py` checks the stored summaries and the deployed `ask` function
+(about 170 checks, 7 questions, a few minutes). News changes every hour, so the checks look
+at properties of an answer instead of exact wording: every link exists in the database, every
+number and name in a sentence is supported by the article it links to, a question about
+nothing returns nothing, and a judge model says whether the items fit the question or the
+section. The judge is a different model from the writer so it does not grade its own work,
+and it is calibrated on obvious cases before its verdicts are trusted (`--judge-test`).
+`--self-test` feeds deliberately broken answers to the checks to prove they can fail.
+
+What the evaluations found and what was changed:
+
+- **About 10 percent of generated sentences in one section were linked to the wrong
+  article.** The model chose articles by number and sometimes wrote the wrong one. Now it
+  copies the article title, the code matches on the title, and a grounding check requires the
+  sentence to share a name or number with the linked article.
+- **Section tabs contained stories from other subjects**, because a story's category came from
+  its feed and some feeds are general. General feeds are now their own category, the summary
+  prompt names the section's subject, and a section can draw extra candidates from the general
+  feeds, balanced across outlets (the politics tab had been fed by a single outlet).
+- **Chat answers merged too aggressively.** A rule to drop duplicates collapsed ten useful
+  articles about one event into one sentence; the prompt now keeps distinct angles.
+- **The first judge was wrong** (it called a TV-series question's correct answers irrelevant),
+  caused by a confusing instruction and rate limits. A per-item yes/no verdict, pacing and the
+  calibration test fixed it. The offline self test also exposed a gap in the grounding check
+  (a sentence starting with a name like OpenAI), which is now covered by a test.
+
 Free-tier limits that shaped the design (measured, not assumed):
 
 - Every text in a batch embedding call counts as one request: 100 per minute and about
@@ -73,11 +101,11 @@ committed to this repository. Each feed carries a flag for whether its publisher
 of use have been checked.
 
 Status: database schema, the `ask` function with login and quotas, the hourly ingestion job,
-the cached category summaries and a plain web interface (`web/`: login, category tabs, chat)
-are done. The jobs run hourly on GitHub Actions and the site is published to GitHub Pages
-by `.github/workflows/pages.yml` whenever `web/` changes:
+the cached category summaries, evaluations of the query path and a plain web interface
+(`web/`: login, category tabs, chat) are done. The jobs run hourly on GitHub Actions and the
+site is published to GitHub Pages by `.github/workflows/pages.yml` whenever `web/` changes:
 https://emiryucedag.github.io/tr-news_research_rag-agent/ (category tabs and the full chat
-need an invited account). Still to do: a nicer interface and evaluations of the new query path.
+need an invited account). Still to do: a nicer interface and an invitation request form.
 
 ---
 
@@ -282,8 +310,10 @@ news-agent/
 │   │   ├── tracer.py             # trace / span / generation recording
 │   │   └── show_trace.py         # list traces, render span trees, dump a step's prompt
 │   ├── evals/
-│   │   ├── run_evals.py          # automated scenario checks (citations, dates, junk regressions)
-│   │   └── check_determinism.py  # repeatability check for the relevance filter
+│   │   ├── run_evals.py          # v1: automated scenario checks (citations, dates, junk regressions)
+│   │   ├── check_determinism.py  # v1: repeatability check for the relevance filter
+│   │   ├── eval_web.py           # web app: checks on summaries and the ask function
+│   │   └── test_guards.py        # web app: unit tests for the sentence checks
 │   ├── jobs/                     # web app: hourly ingestion (feeds.py, ingest.py, common.py)
 │   ├── spike/                    # web app: throwaway scripts from the architecture spike
 │   ├── traces/                   # created at runtime, ignored by git

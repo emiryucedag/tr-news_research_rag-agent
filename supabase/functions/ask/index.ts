@@ -27,6 +27,8 @@ const USER_DAILY_LIMIT = num("USER_DAILY_LIMIT", 10);
 const USER_POOL_LIMIT = num("USER_POOL_LIMIT", 250); // all signed-in users together
 const GUEST_DAILY_LIMIT = num("GUEST_DAILY_LIMIT", 1); // per IP
 const GUEST_POOL_LIMIT = num("GUEST_POOL_LIMIT", 30); // all guests together
+const EVAL_DAILY_LIMIT = num("EVAL_DAILY_LIMIT", 60); // the evaluation runner, with its own pool
+const EVAL_KEY = Deno.env.get("EVAL_KEY") ?? "";
 
 const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") ??
   "http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173").split(",").map((s) => s.trim());
@@ -39,11 +41,12 @@ type Article = {
   summary: string | null;
   link: string;
   source: string;
+  language: string;
   published_at: string;
   similarity: number;
 };
 
-type Identity = { scope: "user" | "guest"; subject: string; limit: number; pool: string; poolLimit: number };
+type Identity = { scope: "user" | "guest" | "eval"; subject: string; limit: number; pool: string; poolLimit: number };
 
 // --- http helpers -------------------------------------------------------------
 
@@ -72,6 +75,12 @@ async function sha256Hex(text: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function timingSafeEqual(a: string, b: string): boolean {
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 function clientIp(req: Request): string {
   return req.headers.get("cf-connecting-ip") ??
     req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
@@ -79,6 +88,14 @@ function clientIp(req: Request): string {
 
 /** Returns the caller's identity, or null when an Authorization header is present but invalid. */
 async function identify(req: Request): Promise<Identity | null> {
+  // The evaluation runner proves itself with a secret header and gets its own small quota.
+  const evalKey = req.headers.get("x-eval-key");
+  if (evalKey !== null) {
+    if (EVAL_KEY && evalKey.length === EVAL_KEY.length && timingSafeEqual(evalKey, EVAL_KEY)) {
+      return { scope: "eval", subject: "eval:runner", limit: EVAL_DAILY_LIMIT, pool: "pool:eval", poolLimit: EVAL_DAILY_LIMIT };
+    }
+    return null;
+  }
   const auth = req.headers.get("authorization");
   if (!auth) {
     const ipHash = (await sha256Hex(`${IP_SALT}:${clientIp(req)}`)).slice(0, 32);
@@ -152,9 +169,13 @@ function buildPrompt(question: string, articles: Article[]): string {
   return [
     "You answer a user's question about recent news using ONLY the numbered candidate articles below.",
     "Select only the candidates that directly help answer the question and ignore the rest.",
-    "If several candidates report the same event or story, select only the single most informative one.",
-    "For each selected candidate write ONE sentence in Turkish, in your own words, based only on",
-    "its title and summary. Do not add facts, numbers or names that are not in the candidate.",
+    "If several candidates are near-duplicates (the same event with the same facts), keep only the most",
+    "informative one. Keep candidates that add a different angle, such as reactions, analysis,",
+    "background, market effects or follow-ups: a question about one event can have several useful items.",
+    "Return each item as {n, title, sentence}: n is the candidate's number, title is that candidate's",
+    "exact title copied unchanged, and sentence is ONE sentence in Turkish, in your own words, based",
+    "only on that candidate's title and summary. Do not add facts, numbers or names that are not in",
+    "that candidate, and do not use information from other candidates.",
     "Write correct Turkish using all diacritics (ç, ğ, ı, ö, ş, ü, İ).",
     "Always write numbers as digits (for example 30 bin, 249 dolar), never as words.",
     "If no candidate is relevant, return an empty list.",
@@ -170,8 +191,8 @@ const RESPONSE_SCHEMA = {
   type: "ARRAY",
   items: {
     type: "OBJECT",
-    properties: { n: { type: "INTEGER" }, sentence: { type: "STRING" } },
-    required: ["n", "sentence"],
+    properties: { n: { type: "INTEGER" }, title: { type: "STRING" }, sentence: { type: "STRING" } },
+    required: ["n", "title", "sentence"],
   },
 };
 
@@ -182,7 +203,7 @@ async function generate(question: string, articles: Article[]) {
   });
   const parts = data.candidates?.[0]?.content?.parts ?? [];
   const text = parts.filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text ?? "").join("");
-  return { picks: JSON.parse(text) as { n: number; sentence: string }[], usage: data.usageMetadata ?? {} };
+  return { picks: JSON.parse(text) as { n: number; title: string; sentence: string }[], usage: data.usageMetadata ?? {} };
 }
 
 function formatDate(iso: string): string {
@@ -203,6 +224,72 @@ function plainList(articles: Article[]) {
     link: a.link,
   }));
 }
+
+
+// --- guards (same rules as backend/jobs/guards.py; keep them in step) ----------
+
+const NUMBER_WORDS: Record<number, string[]> = {
+  1: ["one", "bir"], 2: ["two", "iki"], 3: ["three", "üç"], 4: ["four", "dört"],
+  5: ["five", "beş"], 6: ["six", "altı"], 7: ["seven", "yedi"], 8: ["eight", "sekiz"],
+  9: ["nine", "dokuz"], 10: ["ten", "on"], 11: ["eleven", "on bir"], 12: ["twelve", "on iki"],
+  13: ["thirteen"], 14: ["fourteen"], 15: ["fifteen"], 16: ["sixteen"], 17: ["seventeen"],
+  18: ["eighteen"], 19: ["nineteen"], 20: ["twenty", "yirmi"],
+};
+
+/** Every number in the sentence must appear in the article's own text, as digits or as a
+ *  number word (sources often write "two weeks" while the sentence says "2 hafta"). */
+function numbersSupported(sentence: string, sourceText: string): boolean {
+  const text = sourceText.toLocaleLowerCase("tr");
+  for (const num of sentence.match(/\d+/g) ?? []) {
+    if (text.includes(num)) continue;
+    const words = num.length <= 2 ? NUMBER_WORDS[Number(num)] ?? [] : [];
+    const found = words.some((w) => new RegExp(`(?<!\\p{L})${w}(?!\\p{L})`, "u").test(text));
+    if (!found) return false;
+  }
+  return true;
+}
+
+const STEM_LENGTH = 5;
+const stemOf = (word: string) => word.split(/['’]/)[0].toLocaleLowerCase("tr").slice(0, STEM_LENGTH);
+const wordsOf = (text: string) => text.match(/\p{L}[\p{L}\p{N}_'’]*/gu) ?? [];
+
+/** Capitalised words that look like names. The first word counts only when it clearly is one
+ *  ("Name, ...", "Name'nin ...", an all-caps acronym, or a capital inside the word as in OpenAI). */
+function nameStems(sentence: string): Set<string> {
+  const stems = new Set<string>();
+  wordsOf(sentence).forEach((word, i) => {
+    const base = word.split(/['’]/)[0];
+    if (base.length < 3 || !/^\p{Lu}/u.test(word)) return;
+    if (i === 0) {
+      const afterName = sentence.slice(word.length).match(/^\s*[,:]/) !== null;
+      const allCaps = word === word.toLocaleUpperCase("tr") && word !== word.toLocaleLowerCase("tr");
+      const innerCapital = /\p{Lu}/u.test(word.slice(1));
+      if (!(afterName || /['’]/.test(word) || allCaps || innerCapital)) return;
+    }
+    stems.add(stemOf(word));
+  });
+  return stems;
+}
+
+/** False only when the sentence has names or numbers and shares none of them with the source
+ *  (and, for Turkish sources, fewer than two ordinary word stems). */
+function grounded(sentence: string, sourceText: string, language: string): boolean {
+  const names = nameStems(sentence);
+  const digits = sentence.match(/\d+/g) ?? [];
+  if (names.size === 0 && digits.length === 0) return true;
+  const lowered = sourceText.toLocaleLowerCase("tr");
+  const sourceStems = new Set(wordsOf(sourceText).filter((w) => w.length >= 4).map(stemOf));
+  for (const n of names) if (sourceStems.has(n)) return true;
+  if (digits.some((d) => lowered.includes(d))) return true;
+  if (language === "tr") {
+    const shared = new Set(wordsOf(sentence).filter((w) => w.length >= 4).map(stemOf).filter((x) => sourceStems.has(x)));
+    return shared.size >= 2;
+  }
+  return false;
+}
+
+const normaliseTitle = (title: string) =>
+  (title ?? "").toLocaleLowerCase("tr").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
 // --- handler ------------------------------------------------------------------
 
@@ -286,15 +373,31 @@ Deno.serve(async (req) => {
     }
     lap("generate_ms", t);
 
-    // Code-side checks: numbers must exist and be unique; links come from the database.
+    // Code-side checks. The model copies the title of the candidate it means; we match on the
+    // title (not on the number it wrote) and then require numbers and names to be supported by
+    // that article. Links, sources and dates always come from the database.
+    const titleIndex = new Map<string, number>();
+    articles.forEach((a, i) => { if (!titleIndex.has(normaliseTitle(a.title))) titleIndex.set(normaliseTitle(a.title), i); });
     const seen = new Set<number>();
     const items = [];
+    const dropped = { title: 0, number: 0, grounding: 0, other: 0 };
     for (const p of result.picks) {
-      const a = articles[p.n - 1];
-      if (!a || seen.has(p.n) || !p.sentence?.trim()) continue;
-      seen.add(p.n);
+      const position = titleIndex.get(normaliseTitle(p.title));
+      if (position === undefined) { dropped.title++; continue; }
+      let sentence = (p.sentence ?? "").trim();
+      if (seen.has(position) || !sentence) { dropped.other++; continue; }
+      const a = articles[position];
+      const sourceText = `${a.title} ${a.summary ?? ""}`;
+      let ok = true;
+      if (!numbersSupported(sentence, sourceText)) { dropped.number++; ok = false; }
+      else if (!grounded(sentence, sourceText, a.language)) { dropped.grounding++; ok = false; }
+      if (!ok) {
+        if (a.language !== "tr") continue; // an English title does not belong in a Turkish answer
+        sentence = a.title;
+      }
+      seen.add(position);
       items.push({
-        sentence: p.sentence.trim(),
+        sentence,
         title: a.title,
         source: a.source,
         date: formatDate(a.published_at),
@@ -307,7 +410,7 @@ Deno.serve(async (req) => {
       model: GEN_MODEL,
       items,
       candidates: articles.length,
-      dropped_invalid: result.picks.length - items.length,
+      dropped,
       usage: result.usage,
     });
   } catch (e) {

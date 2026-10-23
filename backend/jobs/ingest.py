@@ -154,12 +154,17 @@ def main():
 
     failed = {n: s["error"] for n, s in stats.items() if s["error"]}
     print(f"feeds: {len(FEEDS) - len(failed)} ok, {len(failed)} failed {failed if failed else ''}")
-    existing = {r["id"] for r in db.select_all("articles", {"select": "id"})}
+    existing = {r["id"]: r["category"] for r in db.select_all("articles", {"select": "id,category"})}
     new_rows = [r for r in rows if r["id"] not in existing]
+    # A topical feed beats a general one: a story first stored as "gundem" moves to the more
+    # specific category when a dedicated feed carries it too.
+    reclassified = [r for r in rows
+                    if existing.get(r["id"]) == "gundem" and r["category"] != "gundem"]
     by_cat = defaultdict(int)
     for r in new_rows:
         by_cat[r["category"]] += 1
-    print(f"articles in window: {len(rows)} | already stored: {len(rows) - len(new_rows)} | new: {len(new_rows)}")
+    print(f"articles in window: {len(rows)} | already stored: {len(rows) - len(new_rows)} | new: {len(new_rows)} "
+          f"| moved from gundem to a topical category: {len(reclassified)}")
     print("new by category:", dict(sorted(by_cat.items())))
 
     if args.dry_run:
@@ -171,6 +176,8 @@ def main():
         return
 
     db.insert_ignore("articles", new_rows)
+    if reclassified:
+        db.upsert("articles", reclassified)  # embedding columns are not sent, so they stay as they are
     embedded = embed_pending(db, args.embed_per_run, args.daily_embed_cap, now)
     cutoff = (now - timedelta(days=args.retention_days)).isoformat()
     deleted = db.delete("articles", {"published_at": f"lt.{cutoff}"})
