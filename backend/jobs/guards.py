@@ -96,3 +96,35 @@ def title_index(candidates):
 def match_title(title, index):
     """Position of the candidate whose title the model copied, or None."""
     return index.get(normalise_title(title))
+
+
+# --- claims about reception that nobody stated ---------------------------------------------------
+#
+# Asked for a longer summary than the sources support, a model pads: "... drew wide attention in the
+# press". There is no number or name in such a sentence for the checks above to catch, so these
+# phrases are checked directly: one may appear only if the same phrase is in the source texts.
+
+REACTION_PATTERNS = [
+    r"yankı", r"tepki", r"ilgi (gördü|çekti|odağı)", r"büyük ilgi", r"gündem(i)? (oldu|sarst|belirled)",
+    r"gündeme (oturdu|damga)", r"\bşok", r"merak (edil|konusu|uyandır)", r"endişe", r"heyecan", r"öfke",
+    r"sevinç", r"üzüntü", r"şaşkınlık", r"infial",
+]
+
+
+def _lower_tr(text):
+    return text.replace("İ", "i").replace("I", "ı").lower()
+
+
+def strip_unsupported_reactions(text, source_text):
+    """Drops each sentence of `text` that states a reaction or impact ("drew wide resonance") the
+    sources do not state. Returns the remaining sentences joined, or "" if none are left."""
+    source = _lower_tr(source_text)
+    allowed = {p for p in REACTION_PATTERNS if re.search(p, source)}
+    kept = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text.strip()):
+        lowered = _lower_tr(sentence)
+        if any(re.search(p, lowered) for p in REACTION_PATTERNS if p not in allowed):
+            continue
+        kept.append(sentence)
+    return " ".join(kept)
+

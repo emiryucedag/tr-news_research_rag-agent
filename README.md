@@ -26,18 +26,19 @@ RSS feeds -> filter -> store -> embed  ->  Postgres + pgvector  <-  Edge Functio
                                                                      -> answer
 ```
 
-- **Ingestion** (`backend/jobs/`): 41 feeds in 8 categories. Junk and duplicates are
+- **Ingestion** (`backend/jobs/`): 42 feeds in 8 categories. Junk and duplicates are
   dropped, one feed's wrong timezone label is corrected, and rows older than three days
   are deleted. Before a feed is fetched, the site's `robots.txt` is read and obeyed (`jobs/robots.py`);
   `jobs/check_publishers.py` also prints the notes publishers leave in `robots.txt` about AI use
   and scraping. Everything is stored; only as many articles as the embedding budget
   allows are embedded per run (round-robin across categories, newest first).
-- **Category summaries** (`backend/jobs/summarize.py`): for each category, one model call
-  picks up to 8 distinct stories from the last 48 hours and writes one Turkish sentence
-  per story. Links, sources and dates come from the database. A code check rejects any
-  sentence containing a number that is not in the source text, a category is skipped when
-  its candidate set has not changed, and the fallback is a plain list of titles. The web
-  app reads the stored result and never calls a model for a tab.
+- **Section summaries** (`backend/jobs/summarize.py`): for each section, one model call picks up to 12
+  distinct stories from the last 48 hours. For each it writes a short headline, a one-sentence summary,
+  a longer summary for the pop-up, one of the section's fixed sub-topics and the other outlets reporting
+  the same event. The model copies the title of the candidate it means and the code matches on the title.
+  Links, outlets and dates come from the database. Checks reject numbers, names and reactions ("drew wide
+  attention") that the sources do not state; a section is skipped when nothing changed. The site reads
+  the stored result and never calls a model for a section.
 - **Chat path** (`supabase/functions/ask/`): the question is embedded, the 12 nearest
   articles are fetched with pgvector, and one model call selects the relevant ones. The
   model only sees numbered candidates and returns `[{n, sentence}]`; links, dates and
@@ -94,6 +95,18 @@ What the evaluations found and what was changed:
   feeds, balanced across outlets (the politics tab had been fed by a single outlet).
 - **Chat answers merged too aggressively.** A rule to drop duplicates collapsed ten useful
   articles about one event into one sentence; the prompt now keeps distinct angles.
+- **The detailed summaries invented filler.** Asked for "3 to 5 sentences" when a source held one, the
+  model padded with sentences such as "the incident drew wide attention in the press", which no source
+  said and which contain no number or name for the other checks to catch. The length demand was dropped
+  and sentences claiming a reaction the sources do not state are removed in code.
+- **The hourly job did not run hourly.** GitHub's scheduler fired twice in ten hours (a 321-minute gap),
+  seen as a site that stopped updating. The job now tries three times an hour and writes a heartbeat
+  that the site shows ("last checked 14 minutes ago", or a warning when it is late) and the evaluations
+  check.
+- **Looking at screenshots found bugs the checks could not.** Two colour variables were defined where
+  the variables they depend on did not exist yet, so they silently became invalid (pale backgrounds and
+  borders vanished); a `hidden` attribute lost to a `display` rule; tabular figures widened commas in
+  this font. Each was visible at a glance in a headless-browser capture.
 - **A "what the news does not cover" note written by the model invented gaps.** On open questions
   it listed things nobody asked about in 4 of 9 answerable cases, and once contradicted its own
   answer. The model now only marks which specifically requested items it did not find, and the
@@ -114,16 +127,26 @@ Free-tier limits that shaped the design (measured, not assumed):
   embedding still appear in category views but are not searchable in chat.
 - The generation model has about 500 requests per day; summaries and chat share it.
 
-The interface is a plain static page designed like a newspaper front page: a serif headline
-face (Newsreader) and a sans face for interface text (IBM Plex Sans), both self-hosted so
-visitors' browsers do not contact a font service, hairline rules instead of cards, one accent
-colour, a lead story with secondary ones below it, relative times, an "EN" badge on stories
-translated from English, and chat answers written as a paragraph with numbered footnotes. It
-follows the system light or dark setting and works at phone width.
+The interface is a plain static page (no build step). Each section is its own colour of paper and has
+a drawn mark (no emoji), so a section is recognisable at a glance. A story is a short headline and a
+one-line summary; opening it shows a longer summary, the other outlets that report the same event, a
+link to the source and a box to ask about that story (the story is sent to the server as context, not
+typed into the box). It follows the system light or dark setting and works at phone width. Fonts
+(Besley and Schibsted Grotesk) and the browser library are served from this site, so visitors'
+browsers contact no third party. The design was checked against Anthropic's `frontend-design` guidance,
+whose list of "AI-typical" looks (cream paper with a serif, hairline broadsheet columns, tracked
+all-caps labels, dotted meta lines, arrows after links) described the first version of this page.
+
+Personalisation stays in the browser: what a reader opens is remembered locally (with a two-week
+half-life), sections are ordered by it once there is enough to go on, and when one sub-topic dominates
+a section ("always football in sports") the site asks whether to give it a heading of its own. It can
+be switched off and wiped in one place, and nothing is sent to the server.
 
 Publisher terms were read where possible. The Guardian (which states that use for AI purposes is
 not permitted), Collider and Screen Rant (automated retrieval prohibited without written permission)
-were removed from the feeds. Content policy: only titles and the short feed summaries are stored, for three days; no
+and NTV (its RSS notice allows only non-commercial personal use and rejects adapting the content)
+were removed from the feeds. TRT Haber's general terms forbid quoting, NPR's feeds are described as
+for personal use; both are marked in `feeds.py` and undecided. Content policy: only titles and the short feed summaries are stored, for three days; no
 article text or images; every answer links back to the source. Scraped data is not
 committed to this repository. Each feed carries a flag for whether its publisher's terms
 of use have been checked.
@@ -341,7 +364,9 @@ news-agent/
 │   │   ├── run_evals.py          # v1: automated scenario checks (citations, dates, junk regressions)
 │   │   ├── check_determinism.py  # v1: repeatability check for the relevance filter
 │   │   ├── eval_web.py           # web app: checks on summaries and the ask function
-│   │   └── test_guards.py        # web app: unit tests for the sentence checks
+│   │   ├── test_guards.py        # web app: unit tests for the sentence checks
+│   │   ├── test_summarize.py     # web app: unit tests for turning model picks into stories
+│   │   └── test_robots.py        # web app: unit tests for the robots.txt gate
 │   ├── jobs/                     # web app: hourly ingestion (feeds.py, ingest.py, common.py)
 │   ├── spike/                    # web app: throwaway scripts from the architecture spike
 │   ├── traces/                   # created at runtime, ignored by git
@@ -349,7 +374,7 @@ news-agent/
 ├── supabase/
 │   ├── migrations/               # database schema
 │   └── functions/ask/            # chat Edge Function
-├── web/                          # static site: front page per section, chat (fonts/ is self-hosted)
+├── web/                          # static site; fonts/ and vendor/ are served from here
 └── .github/workflows/            # hourly jobs and the Pages deployment
 ```
 

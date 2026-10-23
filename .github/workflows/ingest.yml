@@ -2,8 +2,11 @@ name: ingest
 
 on:
   schedule:
-    # Every hour at minute 7 (avoids the busiest minute at the top of the hour).
-    - cron: "7 * * * *"
+    # Three tries an hour, away from the busy top of the hour. GitHub does not guarantee scheduled runs:
+    # with one run an hour it fired only twice in about ten hours on the first day. The job is safe to
+    # repeat (articles are matched by id, unchanged sections are skipped), so more tries just make a
+    # missed one less likely to matter.
+    - cron: "11,31,51 * * * *"
   workflow_dispatch:
 
 # Never run two ingestions at once: they share the embedding budget.
@@ -35,7 +38,8 @@ jobs:
 
       - name: Fetch feeds, store and embed
         working-directory: backend
-        run: python jobs/ingest.py
+        # 12 texts per try: three tries an hour keep the embedding use at about 36 an hour, as before.
+        run: python jobs/ingest.py --embed-per-run 12
 
       - name: Build category summaries
         working-directory: backend

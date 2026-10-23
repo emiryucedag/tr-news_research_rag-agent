@@ -2,32 +2,48 @@
 <html lang="tr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Haber Özeti</title>
-  <meta name="description" content="Kategorilere göre saatlik haber özetleri ve haberler hakkında soru sorabileceğin bir sohbet.">
+  <meta name="description" content="Saat başı yenilenen, yapay zekâyla özetlenmiş Türkçe haberler. Bölümlere göre oku, bir habere dokun, ayrıntısını gör, sor.">
   <meta name="color-scheme" content="light dark">
-  <link rel="preload" href="fonts/newsreader-latin-600.woff2" as="font" type="font/woff2" crossorigin>
+  <meta name="theme-color" content="#E8EEF6">
+  <link rel="preload" href="fonts/besley-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/schibsted-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-section="gundem">
   <a class="skip-link" href="#content">İçeriğe geç</a>
 
   <header class="masthead">
-    <div class="masthead-top">
-      <span class="dateline" id="dateline"></span>
+    <div class="brand">
+      <!-- The mark is the site's structure: eight squares, one in each section's colour. -->
+      <svg class="mark" viewBox="0 0 36 36" aria-hidden="true">
+        <rect x="2"  y="2"  width="14" height="7" rx="2" style="fill: var(--gundem-accent)"/>
+        <rect x="20" y="2"  width="14" height="7" rx="2" style="fill: var(--siyaset-accent)"/>
+        <rect x="2"  y="11" width="14" height="7" rx="2" style="fill: var(--spor-accent)"/>
+        <rect x="20" y="11" width="14" height="7" rx="2" style="fill: var(--ekonomi-accent)"/>
+        <rect x="2"  y="20" width="14" height="7" rx="2" style="fill: var(--teknoloji-accent)"/>
+        <rect x="20" y="20" width="14" height="7" rx="2" style="fill: var(--dunya-accent)"/>
+        <rect x="2"  y="29" width="14" height="5" rx="2" style="fill: var(--yapay-zeka-accent)"/>
+        <rect x="20" y="29" width="14" height="5" rx="2" style="fill: var(--populer-kultur-accent)"/>
+      </svg>
+      <h1 class="wordmark">Haber Özeti</h1>
+    </div>
+    <div class="tools">
+      <p class="pulse" id="pulse" role="status">Güncelleme durumu kontrol ediliyor…</p>
+      <button class="text-btn" id="prefs-open" type="button" aria-haspopup="dialog"></button>
       <div id="account">
-        <button id="login-toggle" type="button" class="link-button" aria-expanded="false" aria-controls="login-panel">Giriş yap</button>
+        <button id="login-toggle" type="button" class="text-btn" aria-expanded="false" aria-controls="login-panel">Giriş yap</button>
         <span id="account-email" hidden></span>
-        <button id="logout" type="button" class="link-button" hidden>Çıkış</button>
+        <button id="logout" type="button" class="text-btn" hidden>Çıkış</button>
       </div>
     </div>
-    <h1 class="nameplate">Haber Özeti</h1>
   </header>
 
-  <div class="page">
-    <nav id="tabs" aria-label="Bölümler"></nav>
+  <div class="layout">
+    <nav id="rail" aria-label="Bölümler"></nav>
 
-    <main class="content" id="content">
+    <main id="content">
       <!-- Opened from the header button; the page itself needs no login. -->
       <section id="login-panel" hidden>
         <h2>Giriş</h2>
@@ -35,7 +51,7 @@
         <form id="login-form">
           <label>E-posta <input id="login-email" type="email" autocomplete="email" required></label>
           <label>Şifre <input id="login-password" type="password" autocomplete="current-password" required></label>
-          <button type="submit" id="login-submit">Giriş yap</button>
+          <button type="submit" id="login-submit" class="btn">Giriş yap</button>
           <p id="login-error" class="error" role="alert" hidden></p>
         </form>
 
@@ -43,27 +59,37 @@
         <p class="muted">E-posta adresini bırak. Uygun görülürse davet e-postası alırsın ve şifreni kendin belirlersin. Şifre istemiyoruz.</p>
         <form id="invite-form">
           <label>E-posta <input id="invite-email" type="email" autocomplete="email" required maxlength="254"></label>
-          <label>Kısa not (isteğe bağlı) <input id="invite-note" type="text" maxlength="300"></label>
+          <label>Kısa not (isteğe bağlı) <input id="invite-note" type="text" maxlength="300" autocomplete="off"></label>
           <!-- Bot trap: people never see or fill this field. -->
           <input id="invite-website" class="trap" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
-          <button type="submit" id="invite-submit">Davet iste</button>
+          <button type="submit" id="invite-submit" class="btn">Davet iste</button>
           <p id="invite-message" class="muted" role="status" hidden></p>
         </form>
       </section>
 
-      <div class="section-head">
-        <h2 id="section-title"></h2>
-        <p id="section-updated"></p>
-      </div>
+      <div id="suggestion" hidden></div>
+
+      <header class="section-head">
+        <svg class="section-glyph" id="section-glyph" viewBox="0 0 24 24" aria-hidden="true"></svg>
+        <div>
+          <h2 id="section-title"></h2>
+          <p class="section-blurb" id="section-blurb"></p>
+        </div>
+      </header>
+
+      <div class="topics" id="topics" role="group" aria-label="Konuya göre süz" hidden></div>
       <div id="summary" aria-live="polite"></div>
 
       <section id="chat">
-        <h2>Habere soru sor</h2>
+        <h2>Haberlere soru sor</h2>
         <p class="muted" id="chat-scope"></p>
         <form id="chat-form">
-          <textarea id="chat-input" rows="2" maxlength="300" required aria-label="Sorun"
-                    placeholder="Örnek: Merkez Bankası faiz kararı ne oldu?"></textarea>
-          <button type="submit" id="chat-submit">Sor</button>
+          <label>
+            <span class="sr-only">Sorun</span>
+            <textarea id="chat-input" rows="2" maxlength="300" required autocomplete="off"
+                      placeholder="Örnek: Merkez Bankası faiz kararı ne oldu…"></textarea>
+          </label>
+          <button type="submit" id="chat-submit" class="btn light">Sor</button>
         </form>
         <p id="chat-quota"></p>
         <div id="chat-answer" aria-live="polite"></div>
@@ -72,10 +98,57 @@
   </div>
 
   <footer>
-    <p>Özetleri yapay zekâ yazar ve hatalı olabilir; ayrıntı için kaynak bağlantısına bak. İngilizce kaynakların özetleri Türkçeye çevrilmiştir ve "EN" ile işaretlidir. Sohbet yalnızca son 3 günün haberlerini kapsar, tüm interneti değil.</p>
-    <p>Sorular ve haber başlıkları Google Gemini'ye (ücretsiz katman) gönderilir; Google bu içeriği ürünlerini geliştirmek için kullanabilir.</p>
+    <p>Özetleri yapay zekâ yazar ve hatalı olabilir; ayrıntı için kaynağa git. İngilizce kaynakların özetleri Türkçeye çevrilmiştir ve “EN” ile işaretlidir. Sohbet yalnızca son 3 günün haberlerini kapsar, tüm interneti değil.</p>
+    <p>Sorular ve haber başlıkları Google Gemini’ye (ücretsiz katman) gönderilir; Google bu içeriği ürünlerini geliştirmek için kullanabilir. Hangi haberleri açtığın yalnızca bu tarayıcıda saklanır.</p>
   </footer>
 
+  <!-- A story opens here. Native <dialog>: focus stays inside, Esc closes it. -->
+  <dialog id="story-dialog" aria-labelledby="sd-headline">
+    <article class="sheet">
+      <div class="sheet-top">
+        <span class="sheet-section"><svg id="sd-glyph" viewBox="0 0 24 24" aria-hidden="true"></svg><span id="sd-section"></span></span>
+        <button class="icon-btn" id="sd-close" type="button" aria-label="Kapat"></button>
+      </div>
+      <h2 id="sd-headline"></h2>
+      <p class="dek" id="sd-dek"></p>
+      <p class="meta" id="sd-meta"></p>
+      <div class="detail" id="sd-detail"></div>
+      <section class="also" id="sd-also" hidden>
+        <h3>Aynı haberi veren diğer kaynaklar</h3>
+        <ul id="sd-also-list"></ul>
+      </section>
+      <div class="sheet-actions"><a class="btn" id="sd-source" target="_blank" rel="noopener noreferrer"></a></div>
+      <form class="ask" id="sd-ask">
+        <h3>Bu haber hakkında soru sor</h3>
+        <label>
+          <span class="sr-only">Bu haber hakkında sorun</span>
+          <textarea id="sd-ask-input" rows="2" maxlength="300" required autocomplete="off" placeholder="Örnek: Ne zaman oldu, kimler katıldı…"></textarea>
+        </label>
+        <button type="submit" id="sd-ask-submit" class="btn light">Sor</button>
+        <p class="muted" id="sd-ask-quota"></p>
+        <div id="sd-ask-answer" aria-live="polite"></div>
+      </form>
+    </article>
+  </dialog>
+
+  <!-- What the site has learned from what you open, and the controls for it. -->
+  <dialog id="prefs-dialog" aria-labelledby="pd-title">
+    <article class="sheet">
+      <div class="sheet-top">
+        <h2 id="pd-title">Sana göre düzenleme</h2>
+        <button class="icon-btn" id="pd-close" type="button" aria-label="Kapat"></button>
+      </div>
+      <p class="muted">Hangi haberleri açtığını bu tarayıcı hatırlar ve bölümleri buna göre sıralar. Bilgi sunucuya gönderilmez, başka cihazlara taşınmaz.</p>
+      <label class="check"><input type="checkbox" id="pd-reorder"> Bölümleri en çok okuduğuma göre sırala</label>
+      <h3>En çok açtığın bölümler</h3>
+      <ul class="interest" id="pd-interest"></ul>
+      <h3>Üste alınan konular</h3>
+      <ul class="pinned-list" id="pd-pinned"></ul>
+      <div class="sheet-actions"><button type="button" class="btn ghost" id="pd-clear">Okuma geçmişimi sil</button></div>
+    </article>
+  </dialog>
+
+  <script src="vendor/supabase-js.umd.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

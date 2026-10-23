@@ -8,7 +8,7 @@
 // source names are rendered here in code, so the model cannot corrupt or invent them.
 // If anything goes wrong we fall back to a plain title + link list and give the unit back.
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@5";
-import { json, corsHeaders, nextResetIso, rpc, visitorHash } from "../_shared/http.ts";
+import { json, corsHeaders, nextResetIso, restGet, rpc, visitorHash } from "../_shared/http.ts";
 
 const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
 const EMBED_MODEL = "gemini-embedding-001";
@@ -114,7 +114,7 @@ async function matchArticles(vec: number[], sinceHours: number | null): Promise<
   return r ?? [];
 }
 
-function buildPrompt(question: string, articles: Article[]): string {
+function buildPrompt(question: string, articles: Article[], aboutTitle: string | null): string {
   const list = articles
     .map((a, i) => `[${i + 1}] ${a.title}\n${(a.summary ?? "").slice(0, 400)}`)
     .join("\n\n");
@@ -137,6 +137,10 @@ function buildPrompt(question: string, articles: Article[]): string {
     "asked for, never aspects they did not mention. For an open question such as \"what happened\"",
     "return an empty list.",
     "",
+    ...(aboutTitle
+      ? [`The user is reading the story "${aboutTitle}" and the question is about it. Answer about that story,`,
+         "using other candidates only when they report the same event or add closely related facts.", ""]
+      : []),
     `Question: ${question}`,
     "",
     "Candidates:",
@@ -163,8 +167,8 @@ const RESPONSE_SCHEMA = {
   required: ["items", "asked"],
 };
 
-async function generate(question: string, articles: Article[]) {
-  const prompt = buildPrompt(question, articles);
+async function generate(question: string, articles: Article[], aboutTitle: string | null) {
+  const prompt = buildPrompt(question, articles, aboutTitle);
   let lastError: unknown = new Error("no model configured");
   for (const model of GEN_MODELS) {
     try {
@@ -295,6 +299,8 @@ Deno.serve(async (req) => {
     return json(req, { error: `question must be 1-${MAX_QUESTION_CHARS} characters` }, 400);
   }
   const sinceHours = typeof body.since_hours === "number" ? body.since_hours : null;
+  const aboutLink = typeof body.about === "string" && /^https?:\/\//.test(body.about) && body.about.length <= 600
+    ? body.about : null;
 
   const t0 = performance.now(); // total_ms covers everything below, including login and quota checks
   const timings: Record<string, number> = {};
@@ -339,13 +345,26 @@ Deno.serve(async (req) => {
   };
 
   try {
+    // When the question is asked from a story's pop-up, the story is the context: it is looked up
+    // here, its title leads the search text, and it is always one of the candidates.
+    let aboutArticle: Article | null = null;
+    if (aboutLink) {
+      const rows = await restGet(
+        "articles",
+        `select=id,title,summary,link,source,language,published_at&link=eq.${encodeURIComponent(aboutLink)}&limit=1`,
+      ).catch(() => []);
+      if (rows.length) aboutArticle = { ...rows[0], similarity: 1 };
+    }
+
     let t = performance.now();
-    const vec = await embedQuestion(question);
+    const vec = await embedQuestion((aboutArticle ? `${aboutArticle.title}. ${question}` : question).slice(0, 600));
     geminiRequests++;
     lap("embed_ms", t);
 
     t = performance.now();
-    const articles = await matchArticles(vec, sinceHours);
+    let articles = await matchArticles(vec, sinceHours);
+    if (aboutArticle && !articles.some((a) => a.id === aboutArticle!.id)) articles.unshift(aboutArticle);
+    articles = articles.slice(0, CANDIDATES);
     lap("search_ms", t);
     if (articles.length === 0) {
       refund = true;
@@ -358,7 +377,7 @@ Deno.serve(async (req) => {
     let result;
     try {
       geminiRequests++;
-      result = await generate(question, articles);
+      result = await generate(question, articles, aboutArticle?.title ?? null);
     } catch (e) {
       lap("generate_ms", t);
       refund = true;

@@ -29,8 +29,8 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "jobs"))
 from common import GenerationError, Supabase, generate_json, get_env  # noqa: E402
-from feeds import CATEGORY_TOPICS  # noqa: E402
-from guards import grounded, numbers_supported  # noqa: E402
+from feeds import CATEGORY_SUBTOPICS, CATEGORY_TOPICS  # noqa: E402
+from guards import grounded, numbers_supported, strip_unsupported_reactions  # noqa: E402
 
 CATEGORIES = list(CATEGORY_TOPICS)
 JUDGE_MODEL = "gemini-3.1-flash-lite"  # not the generator (gemini-3.5-flash-lite)
@@ -106,6 +106,46 @@ def check_items(scenario, items):
     return rows
 
 
+def check_story_fields(scenario, category, items):
+    """Checks for the new story fields: short headline, sub-topic from the section's list, a detail
+    that agrees with its sources and carries no padding, and other outlets that are really other."""
+    long_headlines = [i["headline"][:50] for i in items if len(i.get("headline", "")) > 90]
+    check(scenario, "headlines are 90 characters or less", not long_headlines, f"{long_headlines}")
+    bad_topics = [i.get("topic") for i in items if i.get("topic") not in CATEGORY_SUBTOPICS[category]]
+    check(scenario, "every sub-topic is from the section's list", not bad_topics, f"{bad_topics}")
+    with_detail = sum(1 for i in items if i.get("detail"))
+    check(scenario, "at least 70 percent of the stories have a detailed summary", with_detail >= 0.7 * len(items),
+          f"{with_detail} of {len(items)}", soft=True)
+    check(scenario, "no original titles in the public data", all("title" not in i for i in items),
+          "a public item carries a publisher title")
+
+    bad_detail, padded, same_outlet, missing_also = [], [], [], []
+    for item in items:
+        row = stored_article(item["link"])
+        if row is None:
+            continue
+        texts = [f"{row['title']} {row.get('summary') or ''}"]
+        for other in item.get("also", []):
+            other_row = stored_article(other["link"])
+            if other_row is None:
+                missing_also.append(other["link"][:60])
+                continue
+            if other["source"] == item["source"] or other["link"] == item["link"]:
+                same_outlet.append(other["source"])
+            texts.append(f"{other_row['title']} {other_row.get('summary') or ''}")
+        union = " ".join(texts)
+        detail = item.get("detail") or ""
+        if detail:
+            if not numbers_supported(detail, union) or not grounded(detail, union, row["language"]):
+                bad_detail.append(item["headline"][:50])
+            if strip_unsupported_reactions(detail, union) != detail:
+                padded.append(item["headline"][:50])
+    check(scenario, "every detailed summary is supported by its sources", not bad_detail, f"{bad_detail}")
+    check(scenario, "no detailed summary states a reaction its sources do not", not padded, f"{padded}")
+    check(scenario, "'other outlets' are other outlets", not same_outlet, f"{same_outlet}")
+    check(scenario, "'other outlets' exist in the database", not missing_also, f"{missing_also}")
+
+
 # --- judge model ----------------------------------------------------------------
 
 JUDGE_MIN_GAP_SECONDS = 4.5  # the judge model allows 15 requests per minute
@@ -143,12 +183,11 @@ def judge_irrelevant(instruction, entries):
 
 
 def entry_text(item):
-    """What the judge reads: the sentence plus the article title it came from, because a
-    sentence alone (for example 'Meta said its app has 10 million users') may not say which
-    subject it belongs to."""
-    sentence = item.get("sentence") or item.get("title") or ""
-    title = item.get("title") or ""
-    return sentence if sentence == title or not title else f"{sentence} (article title: {title})"
+    """What the judge reads: the headline and the sentence. A sentence alone (for example 'Meta said its
+    app has 10 million users') may not say which subject it belongs to."""
+    headline = item.get("headline") or item.get("title") or ""
+    sentence = item.get("sentence") or ""
+    return sentence if not headline or headline == sentence else f"{headline}: {sentence}"
 
 
 def judge_answer(scenario, question, items):
@@ -178,8 +217,10 @@ def eval_summaries():
         if row is None:
             continue
         check(name, "mode is summary", row["mode"] == "summary", f"mode={row['mode']}")
-        check(name, "5 to 8 items", 5 <= len(row["items"]) <= 8, f"{len(row['items'])} items")
+        check(name, "8 to 12 stories", 8 <= len(row["items"]) <= 12, f"{len(row['items'])} stories")
         check_items(name, row["items"])
+        if row["mode"] == "summary":
+            check_story_fields(name, category, row["items"])
         sources = {i["source"] for i in row["items"]}
         check(name, "at least 2 different outlets", len(sources) >= 2, f"only {sorted(sources)}")
         if row.get("newest_article_at"):
@@ -194,6 +235,19 @@ def eval_summaries():
             else:
                 check(name, "judge: items belong to this section", len(bad) <= MAX_OFF_TOPIC_TAB,
                       f"{len(bad)} off topic: {[row['items'][n - 1]['sentence'][:60] for n in bad]}")
+
+
+def eval_pipeline():
+    """The scheduled jobs write a heartbeat every run. GitHub's own scheduler skipped most hourly runs
+    on the first day, which showed up as hours of silence; this check makes that visible."""
+    print("\n== Scheduled jobs ==")
+    rows = db.select("pipeline_status", {"select": "ingested_at,summarized_at", "id": "eq.main"})
+    if not rows or not rows[0].get("summarized_at"):
+        record("pipeline", "heartbeat exists", "FAIL", "no pipeline_status row")
+        return
+    last = max(filter(None, [rows[0]["ingested_at"], rows[0]["summarized_at"]]))
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() / 60
+    check("pipeline", "last check is under 90 minutes old", age < 90, f"{age:.0f} minutes ago", soft=True)
 
 
 # --- part C: what the public key can and cannot reach --------------------------------
@@ -226,6 +280,8 @@ def eval_public_boundaries():
     s = "public/read"
     r = call("GET", "category_summaries?select=category&limit=1")
     check(s, "category summaries are readable", r.status_code == 200 and len(r.json()) == 1, f"HTTP {r.status_code}")
+    r = call("GET", "pipeline_status?select=summarized_at&limit=1")
+    check(s, "the update heartbeat is readable", r.status_code == 200 and len(r.json()) == 1, f"HTTP {r.status_code}")
     for table in ("articles", "usage_daily", "invite_requests"):
         r = call("GET", f"{table}?select=*&limit=1")
         check(s, f"{table} is not readable", blocked(r), f"HTTP {r.status_code} {r.text[:80]}")
@@ -259,6 +315,15 @@ def eval_public_boundaries():
 def ask(question):
     r = httpx.post(ASK_URL, headers={"x-eval-key": EVAL_KEY, "Content-Type": "application/json"},
                    json={"question": question}, timeout=90)
+    try:
+        return r.status_code, r.json()
+    except ValueError:
+        return r.status_code, {}
+
+
+def ask_about(question, link):
+    r = httpx.post(ASK_URL, headers={"x-eval-key": EVAL_KEY, "Content-Type": "application/json"},
+                   json={"question": question, "about": link}, timeout=90)
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -318,6 +383,16 @@ def eval_ask():
     data, rows = answered(s, "Merkez Bankası faiz kararı ne oldu?")
     check(s, "no 'not covered' note when the news covers the question", not data.get("not_covered"),
           f"not_covered={data.get('not_covered')!r}", soft=True)
+
+    s = "ask/about-a-story"
+    story = db.select("category_summaries", {"select": "items", "category": "eq.spor"})[0]["items"][0]
+    status, data = ask_about("Ne zaman oldu ve kimler vardı?", story["link"])
+    check(s, "HTTP 200", status == 200, f"HTTP {status} {data.get('error')}")
+    if status == 200:
+        links = [i["link"] for i in data.get("items", [])]
+        check(s, "the story the question is about is among the sources", story["link"] in links,
+              f"{len(links)} items, story link not among them")
+        check_items(s, data.get("items", []))
 
     s = "ask/unrelated-question"
     data, rows = answered(s, "kedi maması tarifi")
@@ -458,6 +533,7 @@ def main():
 
     started = time.time()
     eval_summaries()
+    eval_pipeline()
     eval_public_boundaries()
     if not args.summaries:
         eval_ask()

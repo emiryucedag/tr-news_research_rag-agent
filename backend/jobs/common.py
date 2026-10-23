@@ -4,6 +4,7 @@ import html
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 import httpx
@@ -76,10 +77,28 @@ def embedding_text(row):
 class Supabase:
     """Tiny PostgREST client using the secret key (bypasses RLS; server side only)."""
 
+    RETRY_STATUSES = {502, 503, 504}
+
     def __init__(self):
         self.url = get_env("SUPABASE_URL").rstrip("/") + "/rest/v1"
         self.headers = {"apikey": get_env("SUPABASE_SECRET_KEY"), "Content-Type": "application/json"}
         self.client = httpx.Client(timeout=60)
+
+    def _send(self, method, url, **kwargs):
+        """One request, retried twice after a short pause when the network drops the connection or the
+        gateway answers 502/503/504. The scheduled jobs run unattended, so one dropped connection
+        must not end a run."""
+        for attempt in range(3):
+            try:
+                response = self.client.request(method, url, **kwargs)
+                if response.status_code in self.RETRY_STATUSES and attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                return response
+            except httpx.TransportError:
+                if attempt == 2:
+                    raise
+                time.sleep(1.5 * (attempt + 1))
 
     def _check(self, r):
         if r.status_code >= 400:
@@ -87,7 +106,7 @@ class Supabase:
         return r
 
     def select(self, table, params):
-        return self._check(self.client.get(f"{self.url}/{table}", headers=self.headers, params=params)).json()
+        return self._check(self._send("GET", f"{self.url}/{table}", headers=self.headers, params=params)).json()
 
     def select_all(self, table, params, page=1000):
         rows, offset = [], 0
@@ -99,28 +118,28 @@ class Supabase:
             offset += page
 
     def count(self, table, params):
-        r = self._check(self.client.get(
-            f"{self.url}/{table}", headers={**self.headers, "Prefer": "count=exact"},
+        r = self._check(self._send(
+            "GET", f"{self.url}/{table}", headers={**self.headers, "Prefer": "count=exact"},
             params={**params, "select": "id", "limit": 1}))
         return int(r.headers["content-range"].split("/")[1])
 
     def insert_ignore(self, table, rows, chunk=200, conflict="id"):
         for i in range(0, len(rows), chunk):
-            self._check(self.client.post(
-                f"{self.url}/{table}", params={"on_conflict": conflict},
+            self._check(self._send(
+                "POST", f"{self.url}/{table}", params={"on_conflict": conflict},
                 headers={**self.headers, "Prefer": "resolution=ignore-duplicates,return=minimal"},
                 json=rows[i:i + chunk]))
 
     def upsert(self, table, rows, chunk=100, conflict="id"):
         for i in range(0, len(rows), chunk):
-            self._check(self.client.post(
-                f"{self.url}/{table}", params={"on_conflict": conflict},
+            self._check(self._send(
+                "POST", f"{self.url}/{table}", params={"on_conflict": conflict},
                 headers={**self.headers, "Prefer": "resolution=merge-duplicates,return=minimal"},
                 json=rows[i:i + chunk]))
 
     def delete(self, table, params):
-        r = self._check(self.client.delete(
-            f"{self.url}/{table}", params=params,
+        r = self._check(self._send(
+            "DELETE", f"{self.url}/{table}", params=params,
             headers={**self.headers, "Prefer": "count=exact,return=minimal"}))
         return int(r.headers["content-range"].split("/")[1])
 
@@ -166,13 +185,16 @@ class GenerationError(Exception):
 
 def generate_json(model, prompt, schema):
     """One generateContent request that must return JSON matching `schema`."""
-    r = httpx.post(
-        f"{GEMINI_URL}/{model}:generateContent",
-        headers={"x-goog-api-key": get_env("GEMINI_API_KEY")},
-        json={"contents": [{"parts": [{"text": prompt}]}],
-              "generationConfig": {"responseMimeType": "application/json",
-                                   "responseSchema": schema, "temperature": 0}},
-        timeout=120)
+    try:
+        r = httpx.post(
+            f"{GEMINI_URL}/{model}:generateContent",
+            headers={"x-goog-api-key": get_env("GEMINI_API_KEY")},
+            json={"contents": [{"parts": [{"text": prompt}]}],
+                  "generationConfig": {"responseMimeType": "application/json",
+                                       "responseSchema": schema, "temperature": 0}},
+            timeout=120)
+    except httpx.TransportError as e:
+        raise GenerationError(f"{model} network error: {str(e)[:60]}")
     if r.status_code != 200:
         msg = r.json().get("error", {}).get("message", "")[:120] if r.headers.get("content-type", "").startswith("application/json") else ""
         raise GenerationError(f"{model} HTTP {r.status_code} {msg}")

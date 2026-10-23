@@ -188,6 +188,7 @@ def main():
     deleted = db.delete("articles", {"published_at": f"lt.{cutoff}"})
     total = db.count("articles", {})
     unembedded = db.count("articles", {"embedding": "is.null"})
+    db.upsert("pipeline_status", [{"id": "main", "ingested_at": datetime.now(timezone.utc).isoformat()}])
     print(f"stored {len(new_rows)} new | embedded {embedded} | deleted {deleted} older than "
           f"{args.retention_days} days | table now {total} rows, {unembedded} without embedding "
           f"| {time.time() - started:.0f}s")

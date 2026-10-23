@@ -11,9 +11,14 @@ Fields
   language       "tr" or "en"
   tz_fix_hours   added to the parsed publish time. cnnturk.com labels local
                  Istanbul time (+03:00) as GMT, so its times are 3 hours ahead.
-  terms          "explicit"   the publisher offers the feed for use in apps
-                 "unverified" terms not read or no feed clause; show publicly
-                              only after the owner has checked them
+  terms          "explicit"    the publisher offers the feed for use in apps
+                 "restrictive" general terms forbid quoting or use beyond personal purposes,
+                               but say nothing about RSS (TRT Haber)
+                 "personal-only" the publisher says its feeds are for personal, non-commercial
+                               use (NPR, according to a search result; its page could not be read)
+                 "unverified"  terms not found or not readable
+               Feeds whose terms explicitly forbid this use are not listed at all (see the notes at
+               the bottom of this file).
 """
 
 CATEGORIES = [
@@ -26,7 +31,8 @@ CATEGORIES = [
 # digest section is about. A feed can carry stories outside its section; the model skips them.
 CATEGORY_TOPICS = {
     "gundem": "general news of the day in Turkey, on any subject",
-    "siyaset": "politics: government, parliament, parties, elections, politicians and political court cases",
+    "siyaset": ("politics: government, parliament, parties, elections and politicians, including court cases against "
+                "politicians; ordinary crime, corporate news and market regulation are not politics"),
     "spor": "sports news and results",
     "ekonomi": "economy and finance: markets, prices, central banks, companies and business",
     "teknoloji": "technology: devices, software, the internet and the technology business",
@@ -36,6 +42,20 @@ CATEGORY_TOPICS = {
     "populer-kultur": "entertainment: TV series, films, streaming, celebrities and music",
 }
 
+
+# Fixed sub-topics per section. The summary job tags every story with exactly one of them, and the
+# site uses the tags to notice what a reader keeps opening ("always football in sports") and to
+# offer a section of its own for it. A fixed list keeps the tags consistent from hour to hour.
+CATEGORY_SUBTOPICS = {
+    "gundem": ["adliye ve asayiş", "toplum ve yaşam", "sağlık", "eğitim", "şehir ve ulaşım", "afet ve hava", "diğer"],
+    "siyaset": ["iç siyaset", "dış politika", "meclis ve yasalar", "seçim ve partiler", "siyasi davalar", "diğer"],
+    "spor": ["futbol", "basketbol", "voleybol", "tenis", "motor sporları", "diğer sporlar"],
+    "ekonomi": ["borsa ve piyasalar", "döviz ve altın", "faiz ve enflasyon", "şirketler", "enerji ve emtia", "diğer"],
+    "teknoloji": ["mobil ve cihazlar", "oyun", "yazılım ve internet", "donanım", "bilim", "diğer"],
+    "dunya": ["orta doğu", "avrupa", "abd", "rusya ve ukrayna", "asya", "diğer"],
+    "yapay-zeka": ["modeller ve ürünler", "şirketler ve yatırım", "araştırma", "düzenleme ve etik", "diğer"],
+    "populer-kultur": ["dizi", "film", "müzik", "ünlüler", "diğer"],
+}
 
 # Topical feeds are thin for some sections (politics has one prolific outlet), while the
 # general feeds carry stories on every subject. For these sections the summary job also
@@ -58,13 +78,12 @@ def _feed(name, source, url, category, language="tr", tz_fix_hours=0, terms="unv
 
 FEEDS = [
     # gundem: general feeds that cover every subject
-    _feed("NTV Gundem", "NTV", "https://www.ntv.com.tr/gundem.rss", "gundem"),
     _feed("AA", "Anadolu Ajansi", "https://www.aa.com.tr/tr/rss/default?cat=guncel", "gundem"),
     _feed("Hurriyet", "Hurriyet", "https://www.hurriyet.com.tr/rss/anasayfa", "gundem"),
     _feed("Sabah Gundem", "Sabah", "https://www.sabah.com.tr/rss/gundem.xml", "gundem"),
     _feed("CNN Turk", "CNN Turk", "https://www.cnnturk.com/feed/rss/all/news", "gundem", tz_fix_hours=-3),
     _feed("CNN Turk Turkiye", "CNN Turk", "https://www.cnnturk.com/feed/rss/turkiye/news", "gundem", tz_fix_hours=-3),
-    _feed("TRT Haber", "TRT Haber", "https://www.trthaber.com/sondakika.rss", "gundem"),
+    _feed("TRT Haber", "TRT Haber", "https://www.trthaber.com/sondakika.rss", "gundem", terms="restrictive"),
     _feed("Sozcu", "Sozcu", "https://www.sozcu.com.tr/feeds-rss-category-gundem", "gundem"),
     _feed("Cumhuriyet", "Cumhuriyet", "https://www.cumhuriyet.com.tr/rss/son_dakika.xml", "gundem"),
     _feed("BBC Turkce", "BBC Turkce", "https://feeds.bbci.co.uk/turkce/rss.xml", "gundem"),
@@ -79,7 +98,7 @@ FEEDS = [
     _feed("Hurriyet Spor", "Hurriyet", "https://www.hurriyet.com.tr/rss/spor", "spor"),
     _feed("Sabah Spor", "Sabah", "https://www.sabah.com.tr/rss/spor.xml", "spor"),
     _feed("CNN Turk Spor", "CNN Turk", "https://www.cnnturk.com/feed/rss/spor/news", "spor", tz_fix_hours=-3),
-    _feed("TRT Haber Spor", "TRT Haber", "https://www.trthaber.com/spor_articles.rss", "spor"),
+    _feed("TRT Haber Spor", "TRT Haber", "https://www.trthaber.com/spor_articles.rss", "spor", terms="restrictive"),
 
     # ekonomi
     _feed("CNN Turk Ekonomi", "CNN Turk", "https://www.cnnturk.com/feed/rss/ekonomi/news", "ekonomi", tz_fix_hours=-3),
@@ -88,7 +107,6 @@ FEEDS = [
     _feed("Bloomberg HT", "Bloomberg HT", "https://www.bloomberght.com/rss", "ekonomi"),
 
     # teknoloji
-    _feed("NTV Teknoloji", "NTV", "https://www.ntv.com.tr/teknoloji.rss", "teknoloji"),
     _feed("Webtekno", "Webtekno", "https://www.webtekno.com/rss.xml", "teknoloji"),
     _feed("ShiftDelete", "ShiftDelete.Net", "https://shiftdelete.net/feed", "teknoloji"),
     _feed("DonanimHaber", "DonanimHaber", "https://www.donanimhaber.com/rss/tum/", "teknoloji"),
@@ -97,14 +115,13 @@ FEEDS = [
     _feed("Ars Technica", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/index", "teknoloji", "en"),
 
     # dunya
-    _feed("NTV Dunya", "NTV", "https://www.ntv.com.tr/dunya.rss", "dunya"),
     _feed("CNN Turk Dunya", "CNN Turk", "https://www.cnnturk.com/feed/rss/dunya/news", "dunya", tz_fix_hours=-3),
-    _feed("TRT Haber Dunya", "TRT Haber", "https://www.trthaber.com/dunya_articles.rss", "dunya"),
+    _feed("TRT Haber Dunya", "TRT Haber", "https://www.trthaber.com/dunya_articles.rss", "dunya", terms="restrictive"),
     _feed("Hurriyet Dunya", "Hurriyet", "https://www.hurriyet.com.tr/rss/dunya", "dunya"),
     _feed("Sabah Dunya", "Sabah", "https://www.sabah.com.tr/rss/dunya.xml", "dunya"),
     _feed("Sozcu Dunya", "Sozcu", "https://www.sozcu.com.tr/feeds-rss-category-dunya", "dunya"),
     _feed("BBC World", "BBC News", "http://feeds.bbci.co.uk/news/world/rss.xml", "dunya", "en"),
-    _feed("NPR World", "NPR", "https://feeds.npr.org/1004/rss.xml", "dunya", "en"),
+    _feed("NPR World", "NPR", "https://feeds.npr.org/1004/rss.xml", "dunya", "en", terms="personal-only"),
 
     # yapay-zeka
     _feed("TechCrunch AI", "TechCrunch", "https://techcrunch.com/category/artificial-intelligence/feed/", "yapay-zeka", "en", terms="explicit"),
@@ -124,6 +141,8 @@ FEEDS = [
 #   Haberturk and Milliyet politics feeds (stale for years), Yeni Safak politics (empty),
 #   NTV Ekonomi (dead), VentureBeat (429), IGN (501), Hugging Face blog (no summaries),
 #   Al Jazeera (terms forbid automated access).
+# Removed on 2026-10-23 after reading NTV's own RSS notice (6 Oct 2023): it allows RSS content only for
+#   non-commercial personal use and rejects adapting it or making another work from it.
 # Removed on 2026-10-23 after reading their robots.txt files:
 #   The Guardian (states that use for large language models, machine learning or AI-related
 #   purposes is not permitted), Collider and Screen Rant (Valnet: automated retrieval of any

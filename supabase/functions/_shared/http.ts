@@ -54,6 +54,15 @@ export async function rpc(name: string, args: Record<string, unknown>) {
   return r.status === 204 ? null : await r.json().catch(() => null);
 }
 
+/** Read rows with the server-side key; `query` is a PostgREST query string such as "select=id&link=eq.x". */
+export async function restGet(table: string, query: string) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+  });
+  if (!r.ok) throw new Error(`read ${table} ${r.status}: ${(await r.text()).slice(0, 160)}`);
+  return await r.json();
+}
+
 /** Insert one row; returns "created" or "exists" when a unique index already has it. */
 export async function insertRow(table: string, row: Record<string, unknown>): Promise<"created" | "exists"> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {

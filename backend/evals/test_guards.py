@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "jobs"))
-from guards import grounded, match_title, normalise_title, numbers_supported, title_index  # noqa: E402
+from guards import (grounded, match_title, normalise_title, numbers_supported, strip_unsupported_reactions,  # noqa: E402
+                    title_index)
 
 failures = []
 
@@ -65,6 +66,19 @@ expect("exact title", match_title("Beşiktaş 2-2 Crystal Palace Maç Özeti", i
 expect("quotes and case ignored", match_title("etsy is cracking down on 'AI slop'", index), 1)
 expect("unknown title", match_title("Spotify bir şey yaptı", index), None)
 expect("normalise", normalise_title("  Hello,  World! "), "hello world")
+
+# --- reactions nobody stated (found in a real summary: "...basında geniş yankı buldu") -----------------
+SRC = ("Manchester United'ın yıldızı Bruno Fernandes'e hırsızlık şoku İngiltere Premier Lig ekibi Manchester United'ın "
+       "kaptanı Bruno Fernandes'in evine hırsız girdi.")
+DETAIL = ("Bruno Fernandes'in evine hırsız girdi. Manchester United'da yaşanan bu hırsızlık şoku basında geniş yankı buldu.")
+expect("padding sentence is dropped, the factual one stays",
+       strip_unsupported_reactions(DETAIL, SRC), "Bruno Fernandes'in evine hırsız girdi.")
+expect("a reaction the source does state is kept",
+       strip_unsupported_reactions("Karar geniş tepki çekti.", "Karar sonrası muhalefetten tepki geldi."), "Karar geniş tepki çekti.")
+expect("'ilgili' (related) is not mistaken for 'ilgi'",
+       strip_unsupported_reactions("Konuyla ilgili açıklama yapıldı.", "Bir açıklama yapıldı."), "Konuyla ilgili açıklama yapıldı.")
+expect("nothing left gives an empty string", strip_unsupported_reactions("Büyük bir şok yaşandı.", "Bir olay oldu."), "")
+expect("Turkish capital I is handled", strip_unsupported_reactions("Kararın ardından ENDİŞE arttı.", "Karar açıklandı."), "")
 
 if failures:
     print(f"{len(failures)} FAILED")
