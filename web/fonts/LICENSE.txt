@@ -1,15 +1,7 @@
 Fonts in this folder
 
-  Besley             Copyright the Besley Project Authors (Indestructible Type, Owen Earl).
-                     A Clarendon-style serif, used for headlines.
-  Schibsted Grotesk  Copyright the Schibsted Grotesk Project Authors (Schibsted Media Group,
-                     Bakken & Baeck). A sans serif made for news interfaces, used for text.
+  Inter  Copyright The Inter Project Authors (https://github.com/rsms/inter).
+         Used on devices without Apple's system font; Apple devices use their own San Francisco.
 
-Both are licensed under the SIL Open Font License, Version 1.1, which permits use, copying
-and redistribution, including on websites, free of charge. The full license text is at
-https://openfontlicense.org/open-font-license-official-text/
-
-They are variable fonts (weights 400 to 900) taken from the Fontsource distribution
-(https://fontsource.org) and served from this site so that visitors' browsers do not contact a
-third party for fonts. Each family has a "latin" and a "latin-ext" file; Turkish needs both
-(for example the letters ğ, ş, İ are in latin-ext).
+Inter is licensed under the SIL Open Font License, Version 1.1 (https://openfontlicense.org).
+The files are the variable latin and latin-ext subsets served by Google Fonts, unmodified.

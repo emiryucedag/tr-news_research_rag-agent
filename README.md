@@ -171,16 +171,18 @@ Free-tier limits that shaped the design (measured, not assumed):
   embedding still appear in category views but are not searchable in chat.
 - The generation model has about 500 requests per day; summaries and chat share it.
 
-The interface is a plain static page (no build step), named Tr News Agent. It is deliberately quiet: one
-neutral page, one brand colour for actions, and each section adds only a small mark of its own (a drawn
-icon, the bar under the selected tab, the rule above the lead story). A story is a headline and a
-one-line summary; opening it shows a longer summary, the other outlets reporting the same event, a link
-to the source and a box to ask about that story. It follows the system light or dark setting and works
-at phone width. Fonts (Besley and Schibsted Grotesk) and the browser library are served from this site, so
-visitors' browsers contact no third party. The design follows the principles in Anthropic's
-`frontend-design` guidance and the ui-ux-pro-max checklist (contrast, touch targets, no emoji as icons,
-reduced motion); the first version of the page, a coloured newspaper look, matched the "AI-typical"
-patterns that guidance lists, and a second version used too many colours.
+The interface is a plain static page (no build step), named Tr News Agent. Its structure and type follow an
+Apple-style design analysis: a parchment page with white cards, one blue for everything clickable, tight
+display type on the system font (San Francisco on Apple devices, self-hosted Inter elsewhere), 17px body text,
+pill-shaped actions, no shadows on interface elements, a frosted top bar. The one deliberate departure is that
+each section keeps a small colour mark of its own (its drawn icon, the bar under the selected tab, the rule
+above the lead story), which is never used for actions. A story is a card with a headline and a one-line
+summary; opening it shows a longer summary, the other outlets reporting the same event, a link to the source
+and a box to ask about that story. It follows the system light or dark setting and works at phone width.
+Fonts and the browser library are served from this site, so visitors' browsers contact no third party.
+The design also follows the contrast, touch-target and reduced-motion rules of Anthropic's `frontend-design`
+guidance and the ui-ux-pro-max checklist. Earlier versions, a coloured newspaper look and then a too colourful
+page, were replaced after review.
 
 Personalisation stays in the browser: what a reader opens is remembered locally (with a two-week
 half-life), sections are ordered by it once there is enough to go on, and when one sub-topic dominates
