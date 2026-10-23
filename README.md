@@ -1,15 +1,54 @@
-# Turkish News Research Agent
+# Tr News Agent
 
-A free-to-run system that researches and summarizes current news (Turkish and English
-sources, Turkish output) with source-cited answers. It is being built in two stages:
+A news digest and question-answering system for Turkish readers. Every hour it collects stories from 42
+Turkish and English feeds, reads the articles, and publishes short, source-linked summaries in eight
+sections. Readers can ask questions about a story or about the news in general and get answers that name
+their sources. The live site is https://emiryucedag.github.io/tr-news_research_rag-agent/.
 
-1. **v1, a local command-line agent** (git tag `v1-cli`): RSS, a local vector store, a
-   researcher and a writer agent on a local model, a human review step and tracing.
-   Documented in the second half of this file.
-2. **A free web app** (branch `web-app`, in progress): category tabs refreshed hourly
-   without any model call, plus a chat limited to a few questions per user per day.
+It runs entirely on free tiers (GitHub Actions, Supabase, the Gemini API free tier, GitHub Pages), and
+that limit shaped the design: roughly 500 generation requests and 1,000 embeddings per day have to cover
+about 2,000 new articles a day plus every reader's questions.
 
-## Web app (in progress)
+## What makes it work
+
+- **The model writes; code decides what is true.** A model never produces a link, outlet name or date; those
+  come from the database. Every generated sentence is checked in code against the article text it came from:
+  numbers must appear in the source, names must overlap with it, filler such as "drew wide attention" is
+  removed unless the source says it, and a headline that only says someone "made a statement" is rewritten
+  to say what was said. A failed check drops or downgrades the item instead of publishing it.
+- **Summaries come from articles, not feed teasers.** Feeds give two lines. The job reads the article page
+  (only where robots.txt allows it and the outlet's terms do not forbid it; text is never stored) and writes
+  from that. Measuring the result showed which outlets cannot be read, and those stories keep the teaser.
+- **Hybrid retrieval.** Questions run a pgvector similarity search and a keyword search together. The
+  keyword path exists because the free embedding quota left about two thirds of recent articles without a
+  vector, so vector search alone could not see them. That gap was found by checking why a plain question
+  returned nothing, not by guessing.
+- **A story question has an order of fallbacks.** It reads the story's own page, then searches the three-day
+  archive, then a free news search, and streams each step to the reader. If nothing answers it, it says so
+  and gives the quota unit back instead of inventing an answer.
+- **Operated like a service.** Atomic per-user and per-day quotas with refunds on failure, JWT verification,
+  row-level security with a public key that can read only the published summaries, a CORS allow-list, two
+  generation models with a plain-list fallback, request timeouts, retries, per-section failure isolation, and
+  a heartbeat the site shows when updates fall behind.
+- **Evaluated, including the evaluator.** About 280 checks look at properties of an answer rather than its
+  wording (links exist, numbers are supported, unrelated questions return nothing, latency stays in budget).
+  A separate judge model grades relevance, was itself tested on obvious cases, and a self-test proves the
+  checks can fail. Changes were kept or reverted by these results; the lessons section lists what they caught.
+
+## Stack
+
+Python jobs (feedparser, httpx) on GitHub Actions; Postgres with pgvector and row-level security on Supabase;
+a TypeScript Edge Function on Deno; Gemini models for generation and embeddings; a static JavaScript front end
+with no build step; a local-model command-line agent (v1, `v1-cli` tag) with researcher and writer agents,
+human review and tracing, documented in the second half of this file.
+
+## Limits, stated plainly
+
+Summaries are machine-written and can be wrong, so each links to its source. Some outlets cannot be read
+for their full text, and the internet-search fallback uses a free service that sometimes returns nothing.
+The free tiers cap volume: not every article is embedded, and a few questions per reader per day are allowed.
+
+## Web app
 
 Goal: users pick a category (politics, sports, economy, technology, world, AI, pop
 culture, general news) and read hourly-refreshed summaries; they can also ask a chatbot
