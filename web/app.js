@@ -511,7 +511,15 @@ function answerNode(data) {
     const web = data.web === "searched"
       ? "İnternette bulduğum sayfalarda da yanıt yoktu."
       : "İnternet aramasından da sonuç alamadım (arama hizmeti yanıt vermemiş olabilir).";
-    return h("p", { class: "note" }, `Bu ayrıntıyı haberin metninde ve son 3 günün haberlerinde bulamadım. ${web} Haberin tamamı için kaynağa gidebilirsin.`);
+    const box = h("div", { class: "answer" },
+      h("p", { class: "note" }, `Bu ayrıntıyı haberin metninde ve son 3 günün haberlerinde bulamadım. ${web} Haberin tamamı için kaynağa gidebilirsin.`));
+    if ((data.items ?? []).length) {
+      box.append(h("p", { class: "note" }, "Konuya yakın haberler:"));
+      const list = h("ol", { class: "sources" });
+      data.items.slice(0, 4).forEach((item, i) => list.append(sourceItem(item, i + 1, true)));
+      box.append(list);
+    }
+    return box;
   }
   if (data.mode !== "answer" && data.mode !== "fallback" && data.mode !== "text") {
     return h("p", { class: "note" }, data.not_covered || "Son 3 günün haberlerinde bu konuyla ilgili bir şey bulamadım.");

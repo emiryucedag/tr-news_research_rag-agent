@@ -578,7 +578,7 @@ Deno.serve(async (req) => {
     const found = await webSearch(story.title, story.link);
     lap("web_search_ms", t);
     if (found.length === 0) {
-      return { ...archive, mode: archive.mode === "fallback" ? "fallback" : "not_found", web: "none" };
+      return { ...archive, mode: "not_found", web: "none" };
     }
     say("Bulunan sayfaları okuyorum…");
     t = performance.now();
@@ -593,7 +593,7 @@ Deno.serve(async (req) => {
       );
       if (hit) return { mode: "text", origin: "web", answer: hit.answer, sources: hit.sources, model: hit.model };
     }
-    return { ...archive, mode: archive.mode === "fallback" ? "fallback" : "not_found", web: "searched" };
+    return { ...archive, mode: "not_found", web: "searched" };
   }
 
   try {
