@@ -13,6 +13,7 @@ Run from backend/:
 """
 import argparse
 import hashlib
+import re
 import sys
 import time
 from collections import Counter
@@ -20,8 +21,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from concurrent.futures import ThreadPoolExecutor
+
+from articletext import fetch_text
 from common import GENERATION_MODELS, GenerationError, Supabase, generate_json
-from feeds import CATEGORIES, CATEGORY_EXTRA_SOURCES, CATEGORY_SUBTOPICS, CATEGORY_TOPICS
+from feeds import CATEGORIES, CATEGORY_EXTRA_SOURCES, CATEGORY_SUBTOPICS, CATEGORY_TOPICS, FEEDS
+from ingest import GATE, USER_AGENT
 from guards import grounded, match_title, numbers_supported, strip_unsupported_reactions, title_index
 
 WINDOW_HOURS = 48
@@ -35,6 +40,10 @@ MAX_HEADLINE_CHARS = 90
 MAX_SENTENCE_CHARS = 300
 MAX_DETAIL_CHARS = 900
 OFF_TOPIC = "bu bölüme uymuyor"  # the model must say so when a story does not belong; the code discards it
+# Outlets whose terms restrict this use: their text is never fetched, only the feed teaser is used.
+NO_BODY_SOURCES = {f["source"] for f in FEEDS if f["terms"] in ("restrictive", "personal-only")}
+MAX_BODY_FOR_PROMPT = 2500   # characters of one article given to the model
+MIN_GAIN = 150               # a fetched text must be this much longer than the teaser to count
 CANDIDATE_COLUMNS = "id,title,summary,link,source,language,published_at"
 
 
@@ -142,7 +151,7 @@ def story_dict(article, headline, sentence, detail, topic, also):
     return {
         "headline": headline, "sentence": sentence, "detail": detail, "topic": topic,
         "source": article["source"], "language": article["language"], "link": article["link"],
-        "published_at": article["published_at"],
+        "published_at": article["published_at"], "from_article": False,
         "also": [{"source": a["source"], "link": a["link"], "language": a["language"]} for a in also],
     }
 
@@ -250,6 +259,98 @@ def select_items(picks, candidates, category):
     return stories, dropped
 
 
+# --- second step: write from the article itself --------------------------------------------------
+
+def enrich_schema():
+    return {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+        "n": {"type": "INTEGER"}, "headline": {"type": "STRING"},
+        "sentence": {"type": "STRING"}, "detail": {"type": "STRING"}},
+        "required": ["n", "headline", "sentence", "detail"]}}
+
+
+def build_enrich_prompt(stories_with_text):
+    blocks = "\n\n".join(f"[{i + 1}] {title}\n{text[:MAX_BODY_FOR_PROMPT]}"
+                         for i, (title, text) in enumerate(stories_with_text))
+    return "\n".join([
+        "You write the news digest of a site whose readers want to learn what happened without opening",
+        "the article. Below are numbered articles (Turkish or English): the title and the article text.",
+        "For each article return an object with:",
+        "  n         the article's number",
+        f"  headline  a short Turkish headline (about 60 characters, never over {MAX_HEADLINE_CHARS}, no final period) that says what",
+        "            happened or what was said. Never a teaser: do not write that someone made a statement,",
+        "            spoke or commented without saying what. Put the substance in the headline",
+        "  sentence  ONE Turkish sentence with the core of the story: who, what, the main figure or claim",
+        "  detail    a Turkish summary of 2 to 5 sentences (up to about 110 words) with the main points the article",
+        "            makes: the statements and what they were, the figures, the reasons, what happens next.",
+        "            For a statement or interview, give what was actually said, in your own words",
+        "Use only what the article text states. Add nothing from other sources or your own knowledge, no commentary,",
+        "no remarks about reactions or resonance unless the text states them. If the text holds little,",
+        "write less. Write correct Turkish with all diacritics. Write numbers as digits.",
+        "",
+        "Articles:",
+        blocks,
+    ])
+
+
+def read_bodies(stories, candidates_by_link):
+    """{link: text} for the stories whose article page may be read and holds more than the teaser."""
+    def one(story):
+        article = candidates_by_link[story["link"]]
+        if article["source"] in NO_BODY_SOURCES:
+            return story["link"], ""
+        text, _ = fetch_text(story["link"], GATE, USER_AGENT)
+        teaser = len(article.get("summary") or "")
+        return story["link"], text if len(text) >= teaser + MIN_GAIN else ""
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return {link: text for link, text in pool.map(one, stories) if text}
+
+
+def enrich(stories, candidates, _unused=None):
+    """Rewrites headline, sentence and detail of stories that are new this run, from the article text.
+    A rewrite replaces the first-step text only when it passes the same checks against the article text;
+    otherwise the story keeps what it had. Returns (stories, counts)."""
+    by_link = {c["link"]: c for c in candidates}
+    bodies = read_bodies(stories, by_link)
+    counts = {"read": len(bodies), "rewritten": 0, "rejected": 0}
+    if not bodies:
+        return stories, counts
+    order = [st for st in stories if st["link"] in bodies]
+    prompt = build_enrich_prompt([(by_link[st["link"]]["title"], bodies[st["link"]]) for st in order])
+    for model in GENERATION_MODELS:
+        try:
+            rewrites = generate_json(model, prompt, enrich_schema())
+            break
+        except GenerationError as e:
+            print("    enrichment failed:", str(e)[:80])
+    else:
+        return stories, counts
+    for r in rewrites:
+        n = r.get("n")
+        if not isinstance(n, int) or not 1 <= n <= len(order):
+            continue
+        story = order[n - 1]
+        article = by_link[story["link"]]
+        source_text = f"{article['title']} {bodies[story['link']]}"
+        lang = article["language"]
+        sentence = clean(r.get("sentence"), MAX_SENTENCE_CHARS + 1)
+        headline = clean(r.get("headline"), MAX_HEADLINE_CHARS + 1).rstrip(".")
+        detail = clean(r.get("detail"), MAX_DETAIL_CHARS + 1)
+        good = (sentence and len(sentence) <= MAX_SENTENCE_CHARS and numbers_supported(sentence, source_text)
+                and grounded(sentence, source_text, lang))
+        if not good:
+            counts["rejected"] += 1
+            continue
+        story["sentence"] = sentence
+        if headline and len(headline) <= MAX_HEADLINE_CHARS and numbers_supported(headline, source_text) \
+                and grounded(headline, source_text, lang):
+            story["headline"] = headline
+        if detail and len(detail) <= MAX_DETAIL_CHARS and numbers_supported(detail, source_text) \
+                and grounded(detail, source_text, lang):
+            story["detail"] = strip_unsupported_reactions(detail, source_text)
+        counts["rewritten"] += 1
+    return stories, counts
+
+
 def summarize(candidates, category):
     """Returns (mode, stories, model, dropped). Never raises for model problems."""
     prompt = build_prompt(candidates, category)
@@ -278,7 +379,7 @@ def main():
     db = Supabase()
     now = datetime.now(timezone.utc)
     since = (now - timedelta(hours=WINDOW_HOURS)).isoformat()
-    stored = {r["category"]: r for r in db.select("category_summaries", {"select": "category,fingerprint"})}
+    stored = {r["category"]: r for r in db.select("category_summaries", {"select": "category,fingerprint,items"})}
 
     failed = []
     for category in ([args.only] if args.only else CATEGORIES):
@@ -294,6 +395,83 @@ def main():
         sys.exit(f"sections that failed: {failed}")
 
 
+# --- headlines that only say that something was said ---------------------------------------------
+
+# "Osimhen'den Lille maçı açıklaması": a headline that ends in the kind of word that hides the content.
+VAGUE_ENDING = re.compile(r"(açıklama(sı|lar|ları|sına|ya)?|yorum(u|lar|ları)?|mesaj(ı|lar|ları)?|"
+                          r"konuş(tu|ması|ma)|değerlendirme(si|ler)?)\s*$", re.I)
+
+
+def vague_headline(headline):
+    return bool(VAGUE_ENDING.search(headline.strip()))
+
+
+def fix_vague_headlines(stories):
+    """One request for the stories whose headline hides what was said. The new headline must say what was
+    said and pass the same checks against the story's own sentence and detail, else the old one stays.
+    Returns the number of headlines replaced."""
+    todo = [st for st in stories if not st.get("headline_checked") and vague_headline(st["headline"])]
+    if not todo:
+        return 0
+    listing = "\n\n".join(f"[{i + 1}] {st['headline']}\n{st['sentence']}\n{st.get('detail') or ''}" for i, st in enumerate(todo))
+    prompt = "\n".join([
+        "Each item below has a headline that only says that someone made a statement, gave a comment or sent a",
+        "message, followed by the story's sentence and details. Write a new Turkish headline for each (about 60",
+        f"characters, never over {MAX_HEADLINE_CHARS}, no final period) that says WHAT was said or announced, using",
+        "only the sentence and details. Do not use the words açıklama, yorum, mesaj or konuştu as the point of the",
+        "headline. If the text does not say what was said, return the old headline unchanged.",
+        "Return objects {n, headline}.", "", listing])
+    schema = {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {"n": {"type": "INTEGER"}, "headline": {"type": "STRING"}},
+                                         "required": ["n", "headline"]}}
+    for st in todo:
+        st["headline_checked"] = True    # one attempt per story, whatever the outcome
+    for model in GENERATION_MODELS:
+        try:
+            rewrites = generate_json(model, prompt, schema)
+            break
+        except GenerationError as e:
+            print("    headline fix failed:", str(e)[:80])
+    else:
+        return 0
+    replaced = 0
+    for r in rewrites:
+        n = r.get("n")
+        if not isinstance(n, int) or not 1 <= n <= len(todo):
+            continue
+        story = todo[n - 1]
+        new = clean(r.get("headline"), MAX_HEADLINE_CHARS + 1).rstrip(".")
+        text = f"{story['sentence']} {story.get('detail') or ''}"
+        if (new and len(new) <= MAX_HEADLINE_CHARS and not vague_headline(new) and numbers_supported(new, text)
+                and grounded(new, text, story["language"])):
+            story["headline"] = new
+            replaced += 1
+    return replaced
+
+
+def write_from_articles(items, candidates, previous):
+    """Stories already written from their article in an earlier run keep that text; new ones are read
+    and rewritten. Returns (items, number read, number rewritten)."""
+    done = {st["link"]: st for st in previous if st.get("from_article")}
+    fresh = []
+    for st in items:
+        old = done.get(st["link"])
+        if old:
+            for key in ("headline", "sentence", "detail", "from_article", "headline_checked"):
+                if key in old:
+                    st[key] = old[key]
+        else:
+            fresh.append(st)
+    if not fresh:
+        return items, 0, 0
+    rewritten_links = set()
+    before = {st["link"]: (st["headline"], st["sentence"], st["detail"]) for st in fresh}
+    _, counts = enrich(fresh, candidates, None)
+    for st in fresh:
+        if (st["headline"], st["sentence"], st["detail"]) != before[st["link"]]:
+            st["from_article"] = True
+    return items, counts["read"], counts["rewritten"]
+
+
 def process_category(db, category, since, now, stored, force):
     started = time.time()
     candidates = pick_candidates(db, category, since)
@@ -306,6 +484,10 @@ def process_category(db, category, since, now, stored, force):
         return
     else:
         mode, items, model, dropped = summarize(candidates, category)
+        if mode == "summary":
+            items, dropped["read"], dropped["rewritten"] = write_from_articles(
+                items, candidates, stored.get(category, {}).get("items") or [])
+            dropped["vague"] = fix_vague_headlines(items)
 
     db.upsert("category_summaries", [{
         "category": category, "mode": mode, "items": items, "model": model,

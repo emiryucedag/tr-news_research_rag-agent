@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Haber Özeti</title>
-  <meta name="description" content="Saat başı yenilenen, yapay zekâyla özetlenmiş Türkçe haberler. Bölümlere göre oku, bir habere dokun, ayrıntısını gör, sor.">
+  <title>Tr News Agent</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <meta name="description" content="Haber sitelerinde zaman kaybetmeden ne olup bittiğini öğren. Saat başı yenilenen, yapay zekâyla özetlenmiş Türkçe haberler.">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#E8EEF6">
+  <meta name="theme-color" content="#FAFAF9">
   <link rel="preload" href="fonts/besley-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/schibsted-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
@@ -16,18 +17,15 @@
 
   <header class="masthead">
     <div class="brand">
-      <!-- The mark is the site's structure: eight squares, one in each section's colour. -->
+      <!-- The mark reads as a briefing: three lines of text and one signal dot. -->
       <svg class="mark" viewBox="0 0 36 36" aria-hidden="true">
-        <rect x="2"  y="2"  width="14" height="7" rx="2" style="fill: var(--gundem-accent)"/>
-        <rect x="20" y="2"  width="14" height="7" rx="2" style="fill: var(--siyaset-accent)"/>
-        <rect x="2"  y="11" width="14" height="7" rx="2" style="fill: var(--spor-accent)"/>
-        <rect x="20" y="11" width="14" height="7" rx="2" style="fill: var(--ekonomi-accent)"/>
-        <rect x="2"  y="20" width="14" height="7" rx="2" style="fill: var(--teknoloji-accent)"/>
-        <rect x="20" y="20" width="14" height="7" rx="2" style="fill: var(--dunya-accent)"/>
-        <rect x="2"  y="29" width="14" height="5" rx="2" style="fill: var(--yapay-zeka-accent)"/>
-        <rect x="20" y="29" width="14" height="5" rx="2" style="fill: var(--populer-kultur-accent)"/>
+        <rect class="tile" width="36" height="36" rx="9"/>
+        <rect class="line" x="8" y="9" width="20" height="4" rx="2"/>
+        <rect class="line" x="8" y="16" width="20" height="4" rx="2"/>
+        <rect class="line" x="8" y="23" width="11" height="4" rx="2"/>
+        <circle class="dot" cx="27" cy="25" r="3.2"/>
       </svg>
-      <h1 class="wordmark">Haber Özeti</h1>
+      <h1 class="wordmark"><span>Tr</span> News Agent</h1>
     </div>
     <div class="tools">
       <p class="pulse" id="pulse" role="status">Güncelleme durumu kontrol ediliyor…</p>
@@ -98,8 +96,8 @@
   </div>
 
   <footer>
-    <p>Özetleri yapay zekâ yazar ve hatalı olabilir; ayrıntı için kaynağa git. İngilizce kaynakların özetleri Türkçeye çevrilmiştir ve “EN” ile işaretlidir. Sohbet yalnızca son 3 günün haberlerini kapsar, tüm interneti değil.</p>
-    <p>Sorular ve haber başlıkları Google Gemini’ye (ücretsiz katman) gönderilir; Google bu içeriği ürünlerini geliştirmek için kullanabilir. Hangi haberleri açtığın yalnızca bu tarayıcıda saklanır.</p>
+    <p>Özetleri yapay zekâ yazar ve hatalı olabilir; ayrıntı için kaynağa git. İngilizce kaynakların özetleri Türkçeye çevrilmiştir ve “EN” ile işaretlidir. Bir haberin penceresinden sorarsan önce haberin sayfası okunur, sonra son 3 günün haberlerine ve gerekirse internete bakılır; genel sohbet yalnızca son 3 günün haberlerini kapsar.</p>
+    <p>Sorular, haber başlıkları ve okunan haber metinleri Google Gemini’ye (ücretsiz katman) gönderilir; Google bu içeriği ürünlerini geliştirmek için kullanabilir. Hangi haberleri açtığın yalnızca bu tarayıcıda saklanır.</p>
   </footer>
 
   <!-- A story opens here. Native <dialog>: focus stays inside, Esc closes it. -->

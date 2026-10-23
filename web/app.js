@@ -444,17 +444,39 @@ function markRead(link) {
 
 // --- asking the server ---------------------------------------------------------------------
 
-/** Sends a question (and, from a story's pop-up, the story's link) and returns { status, data }. */
-async function askServer(question, about = null) {
+/** Sends a question and returns { status, data }. From a story's pop-up the story's link goes along and
+ *  the server streams what it is doing (one JSON object per line); `onStatus` receives each step. */
+async function askServer(question, about = null, onStatus = () => {}) {
   const headers = { "Content-Type": "application/json" };
   const token = await accessToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   const controller = new AbortController();
-  const giveUp = setTimeout(() => controller.abort(), 30000);
+  const giveUp = setTimeout(() => controller.abort(), about ? 70000 : 30000);
   try {
     const response = await fetch(ASK_URL, { method: "POST", headers, signal: controller.signal,
-      body: JSON.stringify(about ? { question, about } : { question }) });
-    return { status: response.status, data: await response.json().catch(() => ({})) };
+      body: JSON.stringify(about ? { question, about, stream: true } : { question }) });
+    if (!(response.headers.get("content-type") ?? "").includes("ndjson")) {
+      return { status: response.status, data: await response.json().catch(() => ({})) };
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let result = {};
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const lines = buffer.split("\n");
+      buffer = done ? "" : lines.pop();
+      for (const line of done ? lines : lines.filter((l) => l)) {
+        if (!line.trim()) continue;
+        let message;
+        try { message = JSON.parse(line); } catch { continue; }
+        if (message.type === "status") onStatus(message.text);
+        else if (message.type === "result") result = message;
+      }
+      if (done) break;
+    }
+    return { status: result.error ? 502 : 200, data: result };
   } finally {
     clearTimeout(giveUp);
   }
@@ -482,13 +504,30 @@ function sourceItem(item, n, showTitle = false) {
 }
 
 /** A paragraph in which each sentence carries a footnote number, with the sources underneath. */
+const ORIGINS = { story: "Haberin metninden", archive: "Son 3 günün haberlerinden", web: "İnternet aramasından" };
+
 function answerNode(data) {
-  if (data.mode !== "answer" && data.mode !== "fallback") {
+  if (data.mode === "not_found") {
+    const web = data.web === "searched"
+      ? "İnternette bulduğum sayfalarda da yanıt yoktu."
+      : "İnternet aramasından da sonuç alamadım (arama hizmeti yanıt vermemiş olabilir).";
+    return h("p", { class: "note" }, `Bu ayrıntıyı haberin metninde ve son 3 günün haberlerinde bulamadım. ${web} Haberin tamamı için kaynağa gidebilirsin.`);
+  }
+  if (data.mode !== "answer" && data.mode !== "fallback" && data.mode !== "text") {
     return h("p", { class: "note" }, data.not_covered || "Son 3 günün haberlerinde bu konuyla ilgili bir şey bulamadım.");
   }
   const wrapper = h("div", { class: "answer" });
   const sources = h("ol", { class: "sources" });
-  if (data.mode === "answer") {
+  if (data.mode === "text") {
+    wrapper.append(h("span", { class: "origin" }, ORIGINS[data.origin] ?? ORIGINS.story));
+    wrapper.append(h("p", { class: "answer-text" }, data.answer));
+    (data.sources ?? []).forEach((src, i) => {
+      const li = h("li", { id: `fn-${i + 1}` }, h("span", { class: "src" }, src.source), ": ",
+        h("a", { href: safeUrl(src.link), target: "_blank", rel: "noopener noreferrer" }, src.title));
+      sources.append(li);
+    });
+  } else if (data.mode === "answer") {
+    if (data.origin === "archive") wrapper.append(h("span", { class: "origin" }, ORIGINS.archive));
     const text = h("p", { class: "answer-text" });
     data.items.forEach((item, i) => {
       text.append(item.sentence, h("sup", {}, h("a", { href: `#fn-${i + 1}`, "aria-label": `Kaynak ${i + 1}` }, String(i + 1))), " ");
@@ -500,17 +539,19 @@ function answerNode(data) {
     data.items.forEach((item, i) => sources.append(sourceItem(item, i + 1, true)));
   }
   if (data.not_covered) wrapper.append(h("p", { class: "not-covered" }, data.not_covered));
-  wrapper.append(sources);
+  if (sources.children.length) wrapper.append(sources);
   return wrapper;
 }
 
-/** Shared by the chat box and the story pop-up. */
+/** Shared by the chat box and the story pop-up. While the server works, each step it reports is listed. */
 async function runAsk({ question, about, button, out, quotaEl }) {
   button.disabled = true;
-  setContent(out, h("p", { class: "note" }, "Haberlerde aranıyor…"));
-  const slow = setTimeout(() => setContent(out, h("p", { class: "note" }, "Biraz uzun sürüyor, hâlâ arıyorum…")), 4000);
+  const steps = h("ol", { class: "steps", "aria-live": "polite" });
+  const addStep = (text) => steps.append(h("li", {}, text));
+  addStep(about ? "Sorun alındı…" : "Haberlerde aranıyor…");
+  setContent(out, steps);
   try {
-    const { status, data } = await askServer(question, about);
+    const { status, data } = await askServer(question, about, addStep);
     if (data.quota) quotaEl.textContent = quotaText(data.quota, data.scope);
     if (status === 200) {
       setContent(out, answerNode(data));
@@ -527,7 +568,6 @@ async function runAsk({ question, about, button, out, quotaEl }) {
       ? "Cevap çok gecikti. Biraz sonra tekrar dene."
       : "Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene."));
   } finally {
-    clearTimeout(slow);
     button.disabled = false;
   }
 }

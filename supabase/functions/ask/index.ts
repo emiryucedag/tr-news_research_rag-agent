@@ -9,6 +9,7 @@
 // If anything goes wrong we fall back to a plain title + link list and give the unit back.
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@5";
 import { json, corsHeaders, nextResetIso, restGet, rpc, visitorHash } from "../_shared/http.ts";
+import { fetchArticleText, mayReadSource } from "../_shared/articletext.ts";
 
 const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
 const EMBED_MODEL = "gemini-embedding-001";
@@ -19,6 +20,8 @@ const EMBED_TIMEOUT_MS = 8000;
 const GENERATE_TIMEOUT_MS = 10000; // per model
 const CANDIDATES = 12;
 const FALLBACK_ITEMS = 5;
+const ANSWER_TIMEOUT_MS = 20000; // reading a whole article takes longer than picking titles
+const WEB_PAGES = 3;
 const MAX_QUESTION_CHARS = 300;
 
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY")!;
@@ -287,6 +290,88 @@ function grounded(sentence: string, sourceText: string, language: string): boole
 const normaliseTitle = (title: string) =>
   (title ?? "").toLocaleLowerCase("tr").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
+// --- answering from an article's own text ---------------------------------------------------
+
+const ANSWER_SCHEMA = {
+  type: "OBJECT",
+  properties: { found: { type: "BOOLEAN" }, answer: { type: "STRING" }, used: { type: "ARRAY", items: { type: "INTEGER" } } },
+  required: ["found", "answer", "used"],
+};
+
+type Source = { title: string; source: string; link: string };
+
+/** One request: answer the question from numbered texts. Returns null when the texts do not contain
+ *  the answer, or when the answer fails the same checks the title-based answers go through. */
+async function answerFromTexts(
+  question: string,
+  texts: { title: string; text: string; source: Source; language: string }[],
+): Promise<{ answer: string; sources: Source[]; model: string } | null> {
+  const blocks = texts.map((t, i) => `[${i + 1}] ${t.title}\n${t.text.slice(0, 2500)}`).join("\n\n");
+  const prompt = [
+    "A reader asks a question about a news story. Answer it using ONLY the numbered article texts below.",
+    "Return {found, answer, used}. found is true only when the texts actually contain the answer.",
+    "answer: Turkish, 1 to 4 sentences, direct. Say what happened or what was said, with the figures and",
+    "names the texts give, in your own words. Never say that something was 'explained' or 'stated' without",
+    "saying what. Add nothing from your own knowledge. If found is false, answer is an empty string.",
+    "used: the numbers of the texts the answer relies on.",
+    "Write correct Turkish with all diacritics. Write numbers as digits.",
+    "",
+    `Question: ${question}`,
+    "",
+    "Texts:",
+    blocks,
+  ].join("\n");
+  for (const model of GEN_MODELS) {
+    try {
+      const data = await geminiPost(`${model}:generateContent`, {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json", responseSchema: ANSWER_SCHEMA, temperature: 0 },
+      }, ANSWER_TIMEOUT_MS);
+      const parts = data.candidates?.[0]?.content?.parts ?? [];
+      const raw = parts.filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text ?? "").join("");
+      const parsed = JSON.parse(raw) as { found: boolean; answer: string; used: number[] };
+      const answer = (parsed.answer ?? "").trim();
+      if (!parsed.found || !answer || answer.length > 700) return null;
+      const used = (parsed.used ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= texts.length);
+      const chosen = used.length ? used.map((n) => texts[n - 1]) : texts;
+      const support = chosen.map((t) => `${t.title} ${t.text}`).join(" ");
+      if (!numbersSupported(answer, support) || !grounded(answer, support, chosen[0].language)) return null;
+      return { answer, sources: chosen.map((t) => t.source), model };
+    } catch {
+      // timeout, overload or invalid JSON: try the next model
+    }
+  }
+  return null;
+}
+
+const STOP = new Set(["için", "gibi", "kadar", "sonra", "önce", "olan", "oldu", "haber", "haberi", "ile", "daha", "bir"]);
+
+/** Free news search (GDELT). Best effort: it limits requests and sometimes returns nothing. */
+async function webSearch(title: string, ownLink: string): Promise<Source[]> {
+  const words = [...new Set((title.match(/\p{L}[\p{L}\p{N}]{3,}/gu) ?? []).filter((w) => !STOP.has(w.toLocaleLowerCase("tr"))))];
+  const keywords = words.sort((a, b) => b.length - a.length).slice(0, 5).join(" ");
+  if (!keywords) return [];
+  const url = "https://api.gdeltproject.org/api/v2/doc/doc?mode=artlist&format=json&maxrecords=12&sort=hybridrel&timespan=7d" +
+    `&query=${encodeURIComponent(keywords)}`;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return [];
+    const data = await r.json().catch(() => ({}));
+    const seenHosts = new Set<string>();
+    const found: Source[] = [];
+    for (const a of data.articles ?? []) {
+      if (!a?.url || a.url === ownLink || !mayReadSource("", a.url)) continue;
+      const host = new URL(a.url).hostname;
+      if (seenHosts.has(host)) continue; // one page per site
+      seenHosts.add(host);
+      found.push({ title: String(a.title ?? host).slice(0, 160), source: String(a.domain ?? host), link: a.url });
+    }
+    return found.slice(0, 6);
+  } catch {
+    return [];
+  }
+}
+
 // --- handler ------------------------------------------------------------------
 
 Deno.serve(async (req) => {
@@ -301,6 +386,9 @@ Deno.serve(async (req) => {
   const sinceHours = typeof body.since_hours === "number" ? body.since_hours : null;
   const aboutLink = typeof body.about === "string" && /^https?:\/\//.test(body.about) && body.about.length <= 600
     ? body.about : null;
+  // A question about one story streams its progress (one JSON object per line); other questions
+  // get a single JSON answer as before.
+  const streaming = body.stream === true && aboutLink !== null;
 
   const t0 = performance.now(); // total_ms covers everything below, including login and quota checks
   const timings: Record<string, number> = {};
@@ -333,29 +421,24 @@ Deno.serve(async (req) => {
 
   let geminiRequests = 0;
   let refund = false;
-  const respond = (payload: Record<string, unknown>, status = 200) => {
+  const payloadOf = (payload: Record<string, unknown>) => {
     const spent = refund ? used - 1 : used;
-    return json(req, {
+    return {
       ...payload,
       scope: who.scope,
       quota: { limit: who.limit, used: spent, remaining: Math.max(who.limit - spent, 0), resets_at: nextResetIso() },
       gemini_requests: geminiRequests,
       timings,
-    }, status);
+    };
+  };
+  const giveBack = async () => {
+    if (refund) return; // once only: several steps may fail in one question
+    refund = true;
+    await rpc("refund_quota", { p_subject: who.subject, p_pool: who.pool }).catch(() => {});
   };
 
-  try {
-    // When the question is asked from a story's pop-up, the story is the context: it is looked up
-    // here, its title leads the search text, and it is always one of the candidates.
-    let aboutArticle: Article | null = null;
-    if (aboutLink) {
-      const rows = await restGet(
-        "articles",
-        `select=id,title,summary,link,source,language,published_at&link=eq.${encodeURIComponent(aboutLink)}&limit=1`,
-      ).catch(() => []);
-      if (rows.length) aboutArticle = { ...rows[0], similarity: 1 };
-    }
-
+  /** Titles and one-sentence summaries from the three-day archive (the path every question can take). */
+  async function archiveAnswer(aboutArticle: Article | null): Promise<Record<string, unknown>> {
     let t = performance.now();
     const vec = await embedQuestion((aboutArticle ? `${aboutArticle.title}. ${question}` : question).slice(0, 600));
     geminiRequests++;
@@ -363,15 +446,10 @@ Deno.serve(async (req) => {
 
     t = performance.now();
     let articles = await matchArticles(vec, sinceHours);
-    if (aboutArticle && !articles.some((a) => a.id === aboutArticle!.id)) articles.unshift(aboutArticle);
+    if (aboutArticle && !articles.some((a) => a.id === aboutArticle.id)) articles.unshift(aboutArticle);
     articles = articles.slice(0, CANDIDATES);
     lap("search_ms", t);
-    if (articles.length === 0) {
-      refund = true;
-      await rpc("refund_quota", { p_subject: who.subject, p_pool: who.pool });
-      lap("total_ms", t0);
-      return respond({ mode: "empty", items: [] });
-    }
+    if (articles.length === 0) return { mode: "empty", items: [] };
 
     t = performance.now();
     let result;
@@ -380,10 +458,8 @@ Deno.serve(async (req) => {
       result = await generate(question, articles, aboutArticle?.title ?? null);
     } catch (e) {
       lap("generate_ms", t);
-      refund = true;
-      await rpc("refund_quota", { p_subject: who.subject, p_pool: who.pool });
-      lap("total_ms", t0);
-      return respond({ mode: "fallback", reason: String(e).slice(0, 200), items: plainList(articles) });
+      await giveBack();
+      return { mode: "fallback", reason: String(e).slice(0, 200), items: plainList(articles) };
     }
     lap("generate_ms", t);
 
@@ -420,8 +496,7 @@ Deno.serve(async (req) => {
         link: a.link,
       });
     }
-    lap("total_ms", t0);
-    return respond({
+    return {
       mode: items.length ? "answer" : "none_relevant",
       model: result.model,
       items,
@@ -429,11 +504,97 @@ Deno.serve(async (req) => {
       dropped,
       not_covered: result.notCovered,
       usage: result.usage,
-    });
-  } catch (e) {
-    refund = true;
-    await rpc("refund_quota", { p_subject: who.subject, p_pool: who.pool }).catch(() => {});
+    };
+  }
+
+  async function lookupStory(): Promise<Article | null> {
+    if (!aboutLink) return null;
+    const rows = await restGet(
+      "articles",
+      `select=id,title,summary,link,source,language,published_at&link=eq.${encodeURIComponent(aboutLink)}&limit=1`,
+    ).catch(() => []);
+    return rows.length ? { ...rows[0], similarity: 1 } : null;
+  }
+
+  /** The order for a question about one story: the story's own page, then the archive, then the web.
+   *  `say` tells the reader which step is running. */
+  async function aboutAnswer(story: Article, say: (text: string) => void): Promise<Record<string, unknown>> {
+    const own: Source = { title: story.title, source: story.source, link: story.link };
+    let t = performance.now();
+
+    say("Haberin sayfasını okuyorum…");
+    const text = await fetchArticleText(story.link, story.source);
+    lap("page_ms", t);
+    if (text) {
+      t = performance.now();
+      geminiRequests++;
+      const hit = await answerFromTexts(question, [{ title: story.title, text, source: own, language: story.language }]);
+      lap("page_answer_ms", t);
+      if (hit) return { mode: "text", origin: "story", answer: hit.answer, sources: hit.sources, model: hit.model };
+      say("Haberde bu ayrıntı yok. Arşivdeki diğer haberlere bakıyorum…");
+    } else {
+      say("Haberin metnine ulaşamadım. Arşivdeki haberlere bakıyorum…");
+    }
+
+    const archive = await archiveAnswer(story);
+    const items = (archive.items ?? []) as unknown[];
+    if (archive.mode === "answer" && items.length > 1) return { ...archive, origin: "archive" };
+
+    say("Arşivde de yeterli bilgi yok. İnternette arıyorum…");
+    t = performance.now();
+    const found = await webSearch(story.title, story.link);
+    lap("web_search_ms", t);
+    if (found.length === 0) {
+      return { ...archive, mode: archive.mode === "fallback" ? "fallback" : "not_found", web: "none" };
+    }
+    say("Bulunan sayfaları okuyorum…");
+    t = performance.now();
+    const pages = (await Promise.all(found.map(async (f) => ({ f, text: await fetchArticleText(f.link, f.source) }))))
+      .filter((p) => p.text).slice(0, WEB_PAGES);
+    lap("web_read_ms", t);
+    if (pages.length) {
+      geminiRequests++;
+      const hit = await answerFromTexts(
+        `${story.title}. ${question}`,
+        pages.map((p) => ({ title: p.f.title, text: p.text, source: p.f, language: "tr" })),
+      );
+      if (hit) return { mode: "text", origin: "web", answer: hit.answer, sources: hit.sources, model: hit.model };
+    }
+    return { ...archive, mode: archive.mode === "fallback" ? "fallback" : "not_found", web: "searched" };
+  }
+
+  try {
+    const story = await lookupStory();
+
+    if (streaming && story) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+          try {
+            const result = await aboutAnswer(story, (text) => send({ type: "status", text }));
+            if (result.mode === "empty" || result.mode === "not_found") await giveBack();
+            lap("total_ms", t0);
+            send({ type: "result", ...payloadOf(result) });
+          } catch (e) {
+            await giveBack();
+            send({ type: "result", ...payloadOf({ error: String(e).slice(0, 200) }) });
+          }
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", ...corsHeaders(req) },
+      });
+    }
+
+    const result = await archiveAnswer(story);
+    if (result.mode === "empty") await giveBack();
     lap("total_ms", t0);
-    return respond({ error: String(e).slice(0, 200) }, 502);
+    return json(req, payloadOf(result));
+  } catch (e) {
+    await giveBack();
+    lap("total_ms", t0);
+    return json(req, payloadOf({ error: String(e).slice(0, 200) }), 502);
   }
 });

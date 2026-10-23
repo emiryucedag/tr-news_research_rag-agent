@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "jobs"))
-from summarize import select_items  # noqa: E402
+from summarize import select_items, vague_headline  # noqa: E402
 
 failures = []
 
@@ -100,6 +100,13 @@ expect("off-topic story is discarded", (len(stories), dropped["offtopic"]), (0, 
 # the same article twice gives one story
 stories, _ = run(pick(1), pick(1))
 expect("no duplicate stories", len(stories), 1)
+
+# a headline that only says something was said is recognised; one that says what was said is not
+expect("vague: statement", vague_headline("Victor Osimhen'den Lille maçı sonrası açıklama"), True)
+expect("vague: ministry", vague_headline("MSB'den askeri hastaneler ve sağlık hizmetleri açıklaması"), True)
+expect("vague: spoke", vague_headline("‘Slow Horses’ Yönetmeni 6. Sezon Finali Hakkında Konuştu"), True)
+expect("not vague: content", vague_headline("Osimhen: Lille'e karşı oynamak çok duygusaldı"), False)
+expect("not vague: starts with the word", vague_headline("Açıklama yapılmadan operasyon başladı"), False)
 
 if failures:
     print(f"{len(failures)} FAILED")

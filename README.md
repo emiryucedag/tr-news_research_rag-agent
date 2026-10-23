@@ -32,13 +32,14 @@ RSS feeds -> filter -> store -> embed  ->  Postgres + pgvector  <-  Edge Functio
   `jobs/check_publishers.py` also prints the notes publishers leave in `robots.txt` about AI use
   and scraping. Everything is stored; only as many articles as the embedding budget
   allows are embedded per run (round-robin across categories, newest first).
-- **Section summaries** (`backend/jobs/summarize.py`): for each section, one model call picks up to 12
-  distinct stories from the last 48 hours. For each it writes a short headline, a one-sentence summary,
-  a longer summary for the pop-up, one of the section's fixed sub-topics and the other outlets reporting
-  the same event. The model copies the title of the candidate it means and the code matches on the title.
-  Links, outlets and dates come from the database. Checks reject numbers, names and reactions ("drew wide
-  attention") that the sources do not state; a section is skipped when nothing changed. The site reads
-  the stored result and never calls a model for a section.
+- **Section summaries** (`backend/jobs/summarize.py`): in two steps per section. First one model call picks up
+  to 12 distinct stories from the last 48 hours (titles and feed teasers) and tags each with a sub-topic and
+  the other outlets reporting it. Then, for stories that are new this run, the article page is read (only
+  when the site's robots.txt allows it and the outlet's terms do not restrict it; the text is never stored)
+  and the headline, one-sentence summary and detailed summary are written from what the article says, so a
+  statement is reported as the statement and not as "he made a statement". Every text must pass the number,
+  name and padding checks against the article text; a headline that only says something was said is
+  rewritten or kept. The site reads the stored result and never calls a model for a section.
 - **Chat path** (`supabase/functions/ask/`): the question is embedded, the 12 nearest
   articles are fetched with pgvector, and one model call selects the relevant ones. The
   model only sees numbered candidates and returns `[{n, sentence}]`; links, dates and
@@ -99,6 +100,10 @@ What the evaluations found and what was changed:
   model padded with sentences such as "the incident drew wide attention in the press", which no source
   said and which contain no number or name for the other checks to catch. The length demand was dropped
   and sentences claiming a reaction the sources do not state are removed in code.
+- **Feed teasers are not content.** Summaries written from a feed's two-line teaser said things such as
+  "X made a statement after the match", because the teaser said exactly that. Reading the article page
+  fixed it for most outlets; for those whose terms forbid it or whose page cannot be read, the story keeps
+  the teaser-based text.
 - **The hourly job did not run hourly.** GitHub's scheduler fired twice in ten hours (a 321-minute gap),
   seen as a site that stopped updating. The job now tries three times an hour and writes a heartbeat
   that the site shows ("last checked 14 minutes ago", or a warning when it is late) and the evaluations
@@ -127,15 +132,16 @@ Free-tier limits that shaped the design (measured, not assumed):
   embedding still appear in category views but are not searchable in chat.
 - The generation model has about 500 requests per day; summaries and chat share it.
 
-The interface is a plain static page (no build step). Each section is its own colour of paper and has
-a drawn mark (no emoji), so a section is recognisable at a glance. A story is a short headline and a
-one-line summary; opening it shows a longer summary, the other outlets that report the same event, a
-link to the source and a box to ask about that story (the story is sent to the server as context, not
-typed into the box). It follows the system light or dark setting and works at phone width. Fonts
-(Besley and Schibsted Grotesk) and the browser library are served from this site, so visitors'
-browsers contact no third party. The design was checked against Anthropic's `frontend-design` guidance,
-whose list of "AI-typical" looks (cream paper with a serif, hairline broadsheet columns, tracked
-all-caps labels, dotted meta lines, arrows after links) described the first version of this page.
+The interface is a plain static page (no build step), named Tr News Agent. It is deliberately quiet: one
+neutral page, one brand colour for actions, and each section adds only a small mark of its own (a drawn
+icon, the bar under the selected tab, the rule above the lead story). A story is a headline and a
+one-line summary; opening it shows a longer summary, the other outlets reporting the same event, a link
+to the source and a box to ask about that story. It follows the system light or dark setting and works
+at phone width. Fonts (Besley and Schibsted Grotesk) and the browser library are served from this site, so
+visitors' browsers contact no third party. The design follows the principles in Anthropic's
+`frontend-design` guidance and the ui-ux-pro-max checklist (contrast, touch targets, no emoji as icons,
+reduced motion); the first version of the page, a coloured newspaper look, matched the "AI-typical"
+patterns that guidance lists, and a second version used too many colours.
 
 Personalisation stays in the browser: what a reader opens is remembered locally (with a two-week
 half-life), sections are ordered by it once there is enough to go on, and when one sub-topic dominates
@@ -374,7 +380,7 @@ news-agent/
 ├── supabase/
 │   ├── migrations/               # database schema
 │   └── functions/ask/            # chat Edge Function
-├── web/                          # static site; fonts/ and vendor/ are served from here
+├── web/                          # static site (Tr News Agent); fonts/ and vendor/ are served from here
 └── .github/workflows/            # hourly jobs and the Pages deployment
 ```
 
