@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Haber Özeti</title>
+  <meta name="description" content="Kategorilere göre saatlik haber özetleri ve haberler hakkında soru sorabileceğin bir sohbet.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Haber Özeti</h1>
+    <div id="account" hidden>
+      <span id="account-email"></span>
+      <button id="logout" type="button" class="link-button">Çıkış</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Shown when signed out -->
+    <section id="login-view" hidden>
+      <h2>Giriş</h2>
+      <p class="muted">Kategori özetleri davetli kullanıcılara açık. <span id="invite-hint"></span></p>
+      <form id="login-form">
+        <label>E-posta <input id="login-email" type="email" autocomplete="email" required></label>
+        <label>Şifre <input id="login-password" type="password" autocomplete="current-password" required></label>
+        <button type="submit" id="login-submit">Giriş yap</button>
+        <p id="login-error" class="error" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <!-- Shown when signed in -->
+    <section id="app-view" hidden>
+      <nav id="tabs" aria-label="Kategoriler"></nav>
+      <div id="summary" aria-live="polite"></div>
+    </section>
+
+    <!-- Always visible: signed-in users and guests share the same chat -->
+    <section id="chat">
+      <h2>Habere soru sor</h2>
+      <p class="muted" id="chat-scope"></p>
+      <form id="chat-form">
+        <textarea id="chat-input" rows="2" maxlength="300" required
+                  placeholder="Örnek: Merkez Bankası faiz kararı ne oldu?"></textarea>
+        <button type="submit" id="chat-submit">Sor</button>
+      </form>
+      <p id="chat-quota" class="muted"></p>
+      <div id="chat-answer" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Özetleri yapay zekâ yazar ve hatalı olabilir; ayrıntı için kaynak bağlantısına bak. Sohbet yalnızca son 3 günün haberlerini kapsar, tüm interneti değil.</p>
+    <p>Sorular ve haber başlıkları Google Gemini'ye (ücretsiz katman) gönderilir; Google bu içeriği ürünlerini geliştirmek için kullanabilir.</p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

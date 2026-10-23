@@ -1,0 +1,138 @@
+:root {
+  --bg: #fafaf9;
+  --surface: #ffffff;
+  --text: #1c1917;
+  --muted: #6b6760;
+  --border: #e4e1dc;
+  --accent: #1d4ed8;
+  --accent-text: #ffffff;
+  --error: #b91c1c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12110f;
+    --surface: #1c1a17;
+    --text: #f3f1ed;
+    --muted: #a39e95;
+    --border: #35322d;
+    --accent: #6d9bff;
+    --accent-text: #0b0f1a;
+    --error: #f87171;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.top, main, footer {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 16px;
+  padding-bottom: 8px;
+}
+
+h1 { font-size: 1.25rem; margin: 0; }
+h2 { font-size: 1.05rem; margin: 24px 0 8px; }
+
+.muted { color: var(--muted); font-size: 0.9rem; margin: 4px 0 12px; }
+.error { color: var(--error); font-size: 0.9rem; }
+
+form { display: grid; gap: 12px; }
+label { display: grid; gap: 4px; font-size: 0.9rem; }
+
+input, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+textarea { resize: vertical; }
+
+button {
+  font: inherit;
+  padding: 10px 16px;
+  color: var(--accent-text);
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.6; cursor: wait; }
+
+.link-button {
+  padding: 4px 8px;
+  color: var(--accent);
+  background: none;
+  text-decoration: underline;
+}
+
+#account { display: flex; align-items: center; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+#account-email { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Category tabs scroll sideways on narrow screens instead of wrapping. */
+#tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+  padding-bottom: 4px;
+  overflow-x: auto;
+}
+
+#tabs button {
+  flex: none;
+  padding: 8px 14px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+#tabs button[aria-selected="true"] {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+
+.items li {
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.items .sentence { margin: 0 0 6px; }
+.items .meta { margin: 0; font-size: 0.85rem; color: var(--muted); }
+.items a { color: var(--accent); }
+
+.note { margin: 8px 0; font-size: 0.9rem; color: var(--muted); }
+
+footer {
+  margin-top: 32px;
+  padding-top: 16px;
+  padding-bottom: 32px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+}
