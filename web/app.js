@@ -30,8 +30,6 @@ const GLYPHS = {
   "populer-kultur": '<rect x="3.5" y="5" width="17" height="14" rx="2.4"/><path d="M10.2 9.4v5.2l4.4-2.6z" fill="currentColor"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
-  rows: '<rect x="4" y="4.5" width="16" height="6" rx="1.6"/><rect x="4" y="13.5" width="16" height="6" rx="1.6"/>',
-  columns: '<rect x="3" y="5" width="8" height="14" rx="1.6"/><rect x="14" y="5" width="8" height="14" rx="1.6"/>',
   chevronL: '<path d="M14.5 5.5 8 12l6.5 6.5"/>',
   chevronR: '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
@@ -907,8 +905,6 @@ document.addEventListener("visibilitychange", async () => {
 $("sd-close").replaceChildren(glyph("close"));
 $("pd-close").replaceChildren(glyph("close"));
 $("prefs-open").replaceChildren(glyph("sliders"), "Sana göre");
-$("flow-v").replaceChildren(glyph("rows"));
-$("flow-h").replaceChildren(glyph("columns"));
 $("flow-v").addEventListener("click", () => flow !== "v" && setFlow("v"));
 $("flow-h").addEventListener("click", () => flow !== "h" && setFlow("h"));
 syncFlowButtons();

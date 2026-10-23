@@ -9,7 +9,7 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#FAFAF9">
   <link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=__V__">
 </head>
 <body data-section="gundem">
   <a class="skip-link" href="#content">İçeriğe geç</a>
@@ -29,8 +29,8 @@
     <div class="tools">
       <p class="pulse" id="pulse" role="status">Güncelleme durumu kontrol ediliyor…</p>
       <div class="seg" role="group" aria-label="Haber akışı">
-        <button type="button" id="flow-v" aria-pressed="true" aria-label="Dikey akış" title="Dikey akış"></button>
-        <button type="button" id="flow-h" aria-pressed="false" aria-label="Yatay akış" title="Yatay akış"></button>
+        <button type="button" id="flow-v" aria-pressed="true" aria-label="Dikey akış" title="Dikey akış"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4.5" width="16" height="6" rx="1.6"/><rect x="4" y="13.5" width="16" height="6" rx="1.6"/></svg></button>
+        <button type="button" id="flow-h" aria-pressed="false" aria-label="Yatay akış" title="Yatay akış"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="8" height="14" rx="1.6"/><rect x="14" y="5" width="8" height="14" rx="1.6"/></svg></button>
       </div>
       <button class="text-btn" id="prefs-open" type="button" aria-haspopup="dialog"></button>
       <div id="account">
@@ -150,6 +150,6 @@
   </dialog>
 
   <script src="vendor/supabase-js.umd.js"></script>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=__V__"></script>
 </body>
 </html>

@@ -28,6 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/configure-pages@v6
+      # Pages keeps files in the browser cache for ten minutes; a version in the file names keeps the page
+      # and its script and styles from different deployments from being mixed.
+      - run: sed -i "s/__V__/${GITHUB_SHA::8}/g" web/index.html
       - uses: actions/upload-pages-artifact@v5
         with:
           path: web
