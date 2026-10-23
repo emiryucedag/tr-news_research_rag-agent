@@ -104,7 +104,6 @@ FEEDS = [
     _feed("Sabah Dunya", "Sabah", "https://www.sabah.com.tr/rss/dunya.xml", "dunya"),
     _feed("Sozcu Dunya", "Sozcu", "https://www.sozcu.com.tr/feeds-rss-category-dunya", "dunya"),
     _feed("BBC World", "BBC News", "http://feeds.bbci.co.uk/news/world/rss.xml", "dunya", "en"),
-    _feed("Guardian World", "The Guardian", "https://www.theguardian.com/world/rss", "dunya", "en"),
     _feed("NPR World", "NPR", "https://feeds.npr.org/1004/rss.xml", "dunya", "en"),
 
     # yapay-zeka
@@ -118,8 +117,6 @@ FEEDS = [
     _feed("Variety", "Variety", "https://variety.com/feed/", "populer-kultur", "en"),
     _feed("Hollywood Reporter", "The Hollywood Reporter", "https://www.hollywoodreporter.com/feed/", "populer-kultur", "en"),
     _feed("Deadline", "Deadline", "https://deadline.com/feed/", "populer-kultur", "en"),
-    _feed("Collider", "Collider", "https://collider.com/feed/", "populer-kultur", "en"),
-    _feed("Screen Rant", "Screen Rant", "https://screenrant.com/feed/", "populer-kultur", "en"),
 ]
 
 # Checked on 2026-10-22 and left out on purpose:
@@ -127,3 +124,7 @@ FEEDS = [
 #   Haberturk and Milliyet politics feeds (stale for years), Yeni Safak politics (empty),
 #   NTV Ekonomi (dead), VentureBeat (429), IGN (501), Hugging Face blog (no summaries),
 #   Al Jazeera (terms forbid automated access).
+# Removed on 2026-10-23 after reading their robots.txt files:
+#   The Guardian (states that use for large language models, machine learning or AI-related
+#   purposes is not permitted), Collider and Screen Rant (Valnet: automated retrieval of any
+#   content is prohibited without written permission).

@@ -292,7 +292,7 @@ function chatMessage(text, isError = false) {
 function renderAnswer(data) {
   const answer = $("chat-answer");
   if (data.mode !== "answer" && data.mode !== "fallback") {
-    chatMessage("Son 3 günün haberlerinde bu konuyla ilgili bir şey bulamadım.");
+    chatMessage(data.not_covered || "Son 3 günün haberlerinde bu konuyla ilgili bir şey bulamadım.");
     return;
   }
   const sources = h("ol", { class: "sources" });
@@ -309,6 +309,10 @@ function renderAnswer(data) {
   } else {
     wrapper.append(h("p", { class: "note" }, "Özet hazırlanamadı. En yakın haberler:"));
     data.items.forEach((item, i) => sources.append(sourceItem(item, i + 1, true)));
+  }
+  if (data.not_covered) {
+    // The part of the question the news does not answer, said plainly instead of being skipped.
+    wrapper.append(h("p", { class: "note not-covered" }, data.not_covered));
   }
   wrapper.append(sources);
   setContent(answer, wrapper);
@@ -342,13 +346,16 @@ $("chat-form").addEventListener("submit", async (event) => {
   const button = $("chat-submit");
   button.disabled = true;
   chatMessage("Haberlerde aranıyor…");
+  const slowNotice = setTimeout(() => chatMessage("Biraz uzun sürüyor, hâlâ arıyorum…"), 4000);
+  const controller = new AbortController();
+  const giveUp = setTimeout(() => controller.abort(), 30000);
 
   try {
     const headers = { "Content-Type": "application/json" };
     const token = await accessToken();
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const response = await fetch(ASK_URL, { method: "POST", headers, body: JSON.stringify({ question }) });
+    const response = await fetch(ASK_URL, { method: "POST", headers, body: JSON.stringify({ question }), signal: controller.signal });
     const data = await response.json().catch(() => ({}));
     showQuota(data.quota, data.scope);
 
@@ -362,9 +369,13 @@ $("chat-form").addEventListener("submit", async (event) => {
     } else {
       chatMessage("Şu an cevap veremiyorum. Biraz sonra tekrar dene.", true);
     }
-  } catch {
-    chatMessage("Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.", true);
+  } catch (error) {
+    chatMessage(error?.name === "AbortError"
+      ? "Cevap çok gecikti. Biraz sonra tekrar dene."
+      : "Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.", true);
   } finally {
+    clearTimeout(slowNotice);
+    clearTimeout(giveUp);
     button.disabled = false;
   }
 });

@@ -279,6 +279,8 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .answer-text sup { font: 600 0.65em var(--sans); margin-left: 1px; }
 .answer-text sup a { text-decoration: none; }
 
+.not-covered { margin: 14px 0 0; padding-left: 12px; border-left: 2px solid var(--rule); }
+
 .sources { margin: 16px 0 0; padding: 12px 0 0 1.4rem; border-top: 1px solid var(--rule); font-size: 0.85rem; color: var(--ink-soft); }
 .sources li { margin: 6px 0; }
 .sources li::marker { font-weight: 600; color: var(--ink); }

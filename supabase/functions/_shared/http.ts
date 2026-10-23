@@ -16,6 +16,7 @@ export function corsHeaders(req: Request): Record<string, string> {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Headers"] = "authorization, content-type, apikey, x-client-info";
     headers["Access-Control-Allow-Methods"] = "POST, OPTIONS";
+    headers["Access-Control-Max-Age"] = "86400"; // the browser may reuse this answer for a day, saving a round trip
   }
   return headers;
 }

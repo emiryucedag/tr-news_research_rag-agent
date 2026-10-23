@@ -20,8 +20,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import (RETENTION_DAYS, EmbedQuotaError, Supabase, clean_text, embed_documents,
                     embedding_text, is_junk, make_id, vector_literal)
 from feeds import FEEDS
+from robots import RobotsGate
 
 USER_AGENT = "Mozilla/5.0 (compatible; news-agent/0.1; hobby project)"
+GATE = RobotsGate(USER_AGENT)
 MAX_SUMMARY_CHARS = 600
 
 
@@ -29,6 +31,9 @@ MAX_SUMMARY_CHARS = 600
 
 def fetch_feed(feed):
     """Returns (feed, entries or None, error text)."""
+    allowed, reason = GATE.check(feed["url"])
+    if not allowed:
+        return feed, None, reason  # the site's robots.txt does not allow us (or could not be read)
     try:
         r = httpx.get(feed["url"], headers={"User-Agent": USER_AGENT}, timeout=20, follow_redirects=True)
         if r.status_code != 200:

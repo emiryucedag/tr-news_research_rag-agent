@@ -28,7 +28,9 @@ RSS feeds -> filter -> store -> embed  ->  Postgres + pgvector  <-  Edge Functio
 
 - **Ingestion** (`backend/jobs/`): 41 feeds in 8 categories. Junk and duplicates are
   dropped, one feed's wrong timezone label is corrected, and rows older than three days
-  are deleted. Everything is stored; only as many articles as the embedding budget
+  are deleted. Before a feed is fetched, the site's `robots.txt` is read and obeyed (`jobs/robots.py`);
+  `jobs/check_publishers.py` also prints the notes publishers leave in `robots.txt` about AI use
+  and scraping. Everything is stored; only as many articles as the embedding budget
   allows are embedded per run (round-robin across categories, newest first).
 - **Category summaries** (`backend/jobs/summarize.py`): for each category, one model call
   picks up to 8 distinct stories from the last 48 hours and writes one Turkish sentence
@@ -40,7 +42,10 @@ RSS feeds -> filter -> store -> embed  ->  Postgres + pgvector  <-  Edge Functio
   articles are fetched with pgvector, and one model call selects the relevant ones. The
   model only sees numbered candidates and returns `[{n, sentence}]`; links, dates and
   source names are filled in by code, so the model cannot corrupt or invent them. Any
-  failure falls back to a plain list of titles and links and gives the user's unit back.
+  failure falls back to a plain list of titles and links and gives the user's unit back. Model calls
+  have timeouts and a second model takes over if the first fails. The model also lists the specific
+  things the user asked for and whether it found them; the code turns the missing ones into a fixed
+  sentence ("Haberlerde puan durumu yer almıyor."), so an answer says what the news does not contain.
   Signed-in users (Supabase Auth JWT, verified in the function against the project's
   public keys) get 10 questions per day; guests without a token get 1 per day per
   salted IP hash. Both are also capped as groups. Counters live in the database,
@@ -89,6 +94,13 @@ What the evaluations found and what was changed:
   feeds, balanced across outlets (the politics tab had been fed by a single outlet).
 - **Chat answers merged too aggressively.** A rule to drop duplicates collapsed ten useful
   articles about one event into one sentence; the prompt now keeps distinct angles.
+- **A "what the news does not cover" note written by the model invented gaps.** On open questions
+  it listed things nobody asked about in 4 of 9 answerable cases, and once contradicted its own
+  answer. The model now only marks which specifically requested items it did not find, and the
+  sentence is built in code: 0 unwanted notes in 12 tries, 6 of 6 correct on unanswerable ones.
+- **"The chat is slow" was measured before being fixed.** The server needs about 1.6 s (model call
+  about 1 s); cold start adds 0.6 s, token verification 0.1 s. What was missing was a timeout and a
+  fallback model for the moments the model is overloaded, and a preflight cache header for browsers.
 - **The first judge was wrong** (it called a TV-series question's correct answers irrelevant),
   caused by a confusing instruction and rate limits. A per-item yes/no verdict, pacing and the
   calibration test fixed it. The offline self test also exposed a gap in the grounding check
@@ -109,7 +121,9 @@ colour, a lead story with secondary ones below it, relative times, an "EN" badge
 translated from English, and chat answers written as a paragraph with numbered footnotes. It
 follows the system light or dark setting and works at phone width.
 
-Content policy: only titles and the short feed summaries are stored, for three days; no
+Publisher terms were read where possible. The Guardian (which states that use for AI purposes is
+not permitted), Collider and Screen Rant (automated retrieval prohibited without written permission)
+were removed from the feeds. Content policy: only titles and the short feed summaries are stored, for three days; no
 article text or images; every answer links back to the source. Scraped data is not
 committed to this repository. Each feed carries a flag for whether its publisher's terms
 of use have been checked.

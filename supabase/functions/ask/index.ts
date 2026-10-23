@@ -13,7 +13,10 @@ import { json, corsHeaders, nextResetIso, rpc, visitorHash } from "../_shared/ht
 const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
 const EMBED_MODEL = "gemini-embedding-001";
 const EMBED_DIMS = 768;
-const GEN_MODEL = Deno.env.get("GEN_MODEL") ?? "gemini-3.5-flash-lite";
+// Primary model first, then a second one with its own free-tier quota if the first fails.
+const GEN_MODELS = [...new Set([Deno.env.get("GEN_MODEL") ?? "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"])];
+const EMBED_TIMEOUT_MS = 8000;
+const GENERATE_TIMEOUT_MS = 10000; // per model
 const CANDIDATES = 12;
 const FALLBACK_ITEMS = 5;
 const MAX_QUESTION_CHARS = 300;
@@ -84,11 +87,12 @@ async function identify(req: Request): Promise<Identity | null> {
 
 // --- gemini -------------------------------------------------------------------
 
-async function geminiPost(path: string, body: unknown) {
+async function geminiPost(path: string, body: unknown, timeoutMs: number) {
   const r = await fetch(`${GEMINI}/${path}`, {
     method: "POST",
     headers: { "x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs), // never wait forever for the model
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`Gemini ${r.status}: ${data?.error?.message?.slice(0, 160) ?? ""}`);
@@ -100,7 +104,7 @@ async function embedQuestion(question: string): Promise<number[]> {
     content: { parts: [{ text: question }] },
     taskType: "RETRIEVAL_QUERY",
     outputDimensionality: EMBED_DIMS,
-  });
+  }, EMBED_TIMEOUT_MS);
   return data.embedding.values;
 }
 
@@ -126,7 +130,12 @@ function buildPrompt(question: string, articles: Article[]): string {
     "that candidate, and do not use information from other candidates.",
     "Write correct Turkish using all diacritics (ç, ğ, ı, ö, ş, ü, İ).",
     "Always write numbers as digits (for example 30 bin, 249 dolar), never as words.",
-    "If no candidate is relevant, return an empty list.",
+    "If no candidate is relevant, return an empty items list.",
+    "Also fill `asked`: the specific pieces of information the user literally asked for, as short",
+    "Turkish noun phrases (for example \"puan durumu\", \"dolar kuru\"), each with found=true if at",
+    "least one candidate contains it and found=false if none does. List only what the user literally",
+    "asked for, never aspects they did not mention. For an open question such as \"what happened\"",
+    "return an empty list.",
     "",
     `Question: ${question}`,
     "",
@@ -136,22 +145,57 @@ function buildPrompt(question: string, articles: Article[]): string {
 }
 
 const RESPONSE_SCHEMA = {
-  type: "ARRAY",
-  items: {
-    type: "OBJECT",
-    properties: { n: { type: "INTEGER" }, title: { type: "STRING" }, sentence: { type: "STRING" } },
-    required: ["n", "title", "sentence"],
+  type: "OBJECT",
+  properties: {
+    items: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: { n: { type: "INTEGER" }, title: { type: "STRING" }, sentence: { type: "STRING" } },
+        required: ["n", "title", "sentence"],
+      },
+    },
+    asked: {
+      type: "ARRAY",
+      items: { type: "OBJECT", properties: { what: { type: "STRING" }, found: { type: "BOOLEAN" } }, required: ["what", "found"] },
+    },
   },
+  required: ["items", "asked"],
 };
 
 async function generate(question: string, articles: Article[]) {
-  const data = await geminiPost(`${GEN_MODEL}:generateContent`, {
-    contents: [{ parts: [{ text: buildPrompt(question, articles) }] }],
-    generationConfig: { responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, temperature: 0 },
-  });
-  const parts = data.candidates?.[0]?.content?.parts ?? [];
-  const text = parts.filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text ?? "").join("");
-  return { picks: JSON.parse(text) as { n: number; title: string; sentence: string }[], usage: data.usageMetadata ?? {} };
+  const prompt = buildPrompt(question, articles);
+  let lastError: unknown = new Error("no model configured");
+  for (const model of GEN_MODELS) {
+    try {
+      const data = await geminiPost(`${model}:generateContent`, {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, temperature: 0 },
+      }, GENERATE_TIMEOUT_MS);
+      const parts = data.candidates?.[0]?.content?.parts ?? [];
+      const text = parts.filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text ?? "").join("");
+      const parsed = JSON.parse(text) as {
+        items: { n: number; title: string; sentence: string }[];
+        asked?: { what: string; found: boolean }[];
+      };
+      // The model only says which asked-for items it could not find; the sentence is built here,
+      // so it cannot contradict the answer or wander into things nobody asked about.
+      const missing = (parsed.asked ?? [])
+        .filter((a) => a && a.found === false && typeof a.what === "string")
+        .map((a) => a.what.trim().slice(0, 60))
+        .filter((w) => w.length >= 3)
+        .slice(0, 3);
+      return {
+        model,
+        picks: parsed.items ?? [],
+        notCovered: missing.length ? `Haberlerde ${missing.join(", ")} yer almıyor.` : "",
+        usage: data.usageMetadata ?? {},
+      };
+    } catch (e) {
+      lastError = e; // timeout, overload or invalid JSON: try the next model
+    }
+  }
+  throw lastError;
 }
 
 function formatDate(iso: string): string {
@@ -252,15 +296,17 @@ Deno.serve(async (req) => {
   }
   const sinceHours = typeof body.since_hours === "number" ? body.since_hours : null;
 
-  const who = await identify(req);
-  if (!who) return json(req, { error: "invalid_token" }, 401);
-
-  const t0 = performance.now();
+  const t0 = performance.now(); // total_ms covers everything below, including login and quota checks
   const timings: Record<string, number> = {};
   const lap = (name: string, from: number) => (timings[name] = Math.round(performance.now() - from));
 
+  const who = await identify(req);
+  lap("auth_ms", t0);
+  if (!who) return json(req, { error: "invalid_token", timings }, 401);
+
   // Take one unit before any model work; give it back if we cannot answer.
   let used: number;
+  const tQuota = performance.now();
   try {
     const q = await rpc("consume_quota", {
       p_subject: who.subject, p_limit: who.limit, p_pool: who.pool, p_pool_limit: who.poolLimit,
@@ -274,6 +320,7 @@ Deno.serve(async (req) => {
       }, 429);
     }
     used = q.used;
+    lap("quota_ms", tQuota);
   } catch (e) {
     return json(req, { error: `quota check failed: ${String(e).slice(0, 120)}` }, 503);
   }
@@ -357,10 +404,11 @@ Deno.serve(async (req) => {
     lap("total_ms", t0);
     return respond({
       mode: items.length ? "answer" : "none_relevant",
-      model: GEN_MODEL,
+      model: result.model,
       items,
       candidates: articles.length,
       dropped,
+      not_covered: result.notCovered,
       usage: result.usage,
     });
   } catch (e) {
