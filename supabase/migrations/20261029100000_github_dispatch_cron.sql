@@ -27,4 +27,5 @@ $$;
 
 revoke execute on function public.dispatch_ingest() from public, anon, authenticated;
 
+select cron.unschedule('dispatch-ingest') where exists (select 1 from cron.job where jobname = 'dispatch-ingest');
 select cron.schedule('dispatch-ingest', '*/20 * * * *', $$select public.dispatch_ingest()$$);

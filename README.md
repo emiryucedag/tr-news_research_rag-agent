@@ -146,7 +146,9 @@ What the evaluations found and what was changed:
 - **The hourly job did not run hourly.** GitHub's scheduler fired twice in ten hours (a 321-minute gap),
   seen as a site that stopped updating. The job now tries three times an hour and writes a heartbeat
   that the site shows ("last checked 14 minutes ago", or a warning when it is late) and the evaluations
-  check.
+  check Still too unreliable (runs every 5 to 7 hours), so the database now starts the workflow itself: a
+  `pg_cron` job calls GitHub's workflow-dispatch API every 20 minutes with a token limited to this one
+  repository and kept in Supabase Vault; GitHub's own schedule stays as a backup.
 - **Looking at screenshots found bugs the checks could not.** Two colour variables were defined where
   the variables they depend on did not exist yet, so they silently became invalid (pale backgrounds and
   borders vanished); a `hidden` attribute lost to a `display` rule; tabular figures widened commas in
