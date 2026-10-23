@@ -316,10 +316,10 @@ function syncFlowButtons() {
   $("flow-h").setAttribute("aria-pressed", String(flow === "h"));
 }
 
-/** One lead story, then the rest of the front page, then a plainer list under "more". In the horizontal
- *  flow the same stories sit in one row that is swiped (touch) or scrolled with the arrows (mouse). */
-function storiesGrid(items, { withLead = true } = {}) {
-  if (flow === "h") return storiesStrip(items, withLead);
+/** One lead story, then the rest of the front page, then a plainer list under "more". In the card flow the
+ *  same stories are a deck: one card at a time, thrown to either side to reach the next. */
+function storiesGrid(items, { withLead = true, key = "all" } = {}) {
+  if (flow === "h") return storiesDeck(items, key);
   const grid = h("div", { class: "stories reveal" });
   items.forEach((item, i) => {
     if (i === 8) grid.append(h("h3", { class: "more-title" }, "Daha fazla haber"));
@@ -328,16 +328,128 @@ function storiesGrid(items, { withLead = true } = {}) {
   return grid;
 }
 
-function storiesStrip(items, withLead) {
-  const strip = h("div", { class: "strip reveal", tabindex: "0", role: "group", "aria-label": "Haberler, yana kaydır" });
-  items.forEach((item, i) => strip.append(storyNode(item, i, { lead: withLead && i === 0 })));
-  const arrow = (name, label, direction) => {
-    const button = h("button", { type: "button", class: `strip-arrow ${direction < 0 ? "prev" : "next"}`, "aria-label": label });
-    button.append(glyph(name));
-    button.addEventListener("click", () => strip.scrollBy({ left: direction * strip.clientWidth * 0.8, behavior: reducedMotion ? "auto" : "smooth" }));
-    return button;
+// Where the reader is in each deck. Opening a story redraws the section when its pop-up closes, so the
+// position is kept here and the deck does not jump back to the first card.
+const deckPositions = new Map();
+const SWIPE_DISTANCE = 96;      // px of drag that throws a card
+const SWIPE_SPEED = 0.6;        // px per ms: a quick flick throws it too
+
+function storiesDeck(items, key) {
+  const deckKey = `${current}:${key}`;
+  let index = Math.min(deckPositions.get(deckKey) ?? 0, items.length);
+  const cards = items.map((item, i) => {
+    const card = storyNode(item, i, {});
+    card.classList.add("deck-card");
+    return card;
+  });
+  const stage = h("div", { class: "deck-stage" }, ...cards);
+  const counter = h("span", { class: "deck-count", "aria-live": "polite" });
+  const backButton = h("button", { type: "button", class: "deck-btn", "aria-label": "Önceki haber" }, glyph("chevronL"));
+  const nextButton = h("button", { type: "button", class: "deck-btn", "aria-label": "Sonraki haber" }, glyph("chevronR"));
+  const restart = h("button", { type: "button", class: "btn ghost" }, "Başa dön");
+  const end = h("div", { class: "deck-end" }, h("p", {}, "Bu bölümdeki haberlerin hepsi bu kadar."), restart);
+  const hint = h("p", { class: "deck-hint" }, "Kartı sağa ya da sola at, sıradaki gelsin. Okumak için karta dokun.");
+  const bar = h("div", { class: "deck-bar" }, backButton, counter, nextButton);
+  const deck = h("div", { class: "deck", tabindex: "0", role: "group", "aria-roledescription": "kart destesi", "aria-label": "Haberler, kaydırarak oku" },
+    stage, end, bar, hint);
+
+  function layout() {
+    cards.forEach((card, i) => {
+      const pos = i - index;
+      card.dataset.pos = pos < 0 ? "past" : pos > 2 ? "far" : String(pos);
+      card.style.transform = "";
+      card.style.opacity = "";
+      card.style.transition = "";
+      card.inert = pos !== 0;
+    });
+    const done = index >= cards.length;
+    stage.hidden = done;
+    end.hidden = !done;
+    bar.hidden = done && cards.length === 0;
+    counter.textContent = done ? `${cards.length} / ${cards.length}` : `${index + 1} / ${cards.length}`;
+    backButton.disabled = index === 0;
+    nextButton.disabled = done;
+    deckPositions.set(deckKey, index);
+  }
+
+  function throwCard(direction) {
+    const top = cards[index];
+    if (!top) return;
+    if (reducedMotion) {
+      index++;
+      layout();
+      return;
+    }
+    top.style.transition = "transform 0.26s ease-out, opacity 0.26s ease-out";
+    top.style.transform = `translateX(${direction * 130}%) rotate(${direction * 14}deg)`;
+    top.style.opacity = "0";
+    setTimeout(() => { index++; layout(); }, 240);
+  }
+
+  function goBack() {
+    if (index === 0) return;
+    index--;
+    layout();
+    if (!reducedMotion) cards[index].animate([{ opacity: 0, transform: "scale(0.94)" }, { opacity: 1, transform: "none" }], { duration: 220, easing: "ease-out" });
+  }
+
+  // dragging the top card (mouse, touch and pen all use pointer events)
+  let drag = null;
+  let suppressClick = false;
+  stage.addEventListener("pointerdown", (event) => {
+    const top = cards[index];
+    if (!top || event.button !== 0 || event.target.closest("a")) return;
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, t: performance.now(), dx: 0, moving: false };
+  });
+  stage.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (!drag.moving) {
+      if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy)) return;
+      drag.moving = true;
+      stage.setPointerCapture(event.pointerId);
+      cards[index].style.transition = "none";
+    }
+    drag.dx = dx;
+    cards[index].style.transform = `translateX(${dx}px) rotate(${dx * 0.04}deg)`;
+  });
+  const release = (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    const { dx, moving, t } = drag;
+    drag = null;
+    if (!moving) return;
+    suppressClick = true;                       // the click that follows a drag must not open the story
+    setTimeout(() => { suppressClick = false; }, 0);
+    const speed = Math.abs(dx) / Math.max(performance.now() - t, 1);
+    if (event.type === "pointerup" && (Math.abs(dx) > SWIPE_DISTANCE || speed > SWIPE_SPEED)) {
+      throwCard(dx > 0 ? 1 : -1);
+    } else {
+      const top = cards[index];
+      top.style.transition = "transform 0.2s ease-out";
+      top.style.transform = "";
+    }
   };
-  return h("div", { class: "strip-wrap" }, strip, arrow("chevronL", "Önceki haberler", -1), arrow("chevronR", "Sonraki haberler", 1));
+  stage.addEventListener("pointerup", release);
+  stage.addEventListener("pointercancel", release);
+  stage.addEventListener("click", (event) => {
+    if (suppressClick) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
+
+  nextButton.addEventListener("click", () => throwCard(-1));
+  backButton.addEventListener("click", goBack);
+  restart.addEventListener("click", () => { index = 0; layout(); });
+  deck.addEventListener("keydown", (event) => {
+    if (event.target !== deck) return;
+    if (event.key === "ArrowRight") { event.preventDefault(); throwCard(1); }
+    if (event.key === "ArrowLeft") { event.preventDefault(); goBack(); }
+  });
+
+  layout();
+  return deck;
 }
 
 function renderTopics(items) {
@@ -409,7 +521,7 @@ function renderSection() {
 
   const pinned = (prefs.pinned[current] ?? []).filter((t) => items.some((i) => i.topic === t));
   if (activeTopic) {
-    nodes.push(storiesGrid(items.filter((i) => i.topic === activeTopic)));
+    nodes.push(storiesGrid(items.filter((i) => i.topic === activeTopic), { key: `topic:${activeTopic}` }));
   } else if (pinned.length) {
     const used = new Set();
     pinned.forEach((topic, n) => {
@@ -423,10 +535,10 @@ function renderSection() {
         renderSection();
       });
       title.append(remove);
-      nodes.push(title, storiesGrid(group, { withLead: n === 0 }));
+      nodes.push(title, storiesGrid(group, { withLead: n === 0, key: `pinned:${topic}` }));
     });
     const rest = items.filter((i) => !used.has(i.id));
-    if (rest.length) nodes.push(h("h3", { class: "group-title" }, "Diğer haberler"), storiesGrid(rest, { withLead: false }));
+    if (rest.length) nodes.push(h("h3", { class: "group-title" }, "Diğer haberler"), storiesGrid(rest, { withLead: false, key: "rest" }));
   } else {
     nodes.push(storiesGrid(items));
   }
@@ -436,6 +548,7 @@ function renderSection() {
 async function goSection(id, { openId = null, push = false } = {}) {
   current = id;
   activeTopic = null;
+  deckPositions.clear();
   document.body.dataset.section = id;
   const paper = getComputedStyle(document.body).getPropertyValue("--paper").trim();
   document.querySelector('meta[name="theme-color"]').setAttribute("content", paper);
