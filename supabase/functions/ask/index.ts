@@ -18,7 +18,8 @@ const EMBED_DIMS = 768;
 const GEN_MODELS = [...new Set([Deno.env.get("GEN_MODEL") ?? "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"])];
 const EMBED_TIMEOUT_MS = 8000;
 const GENERATE_TIMEOUT_MS = 10000; // per model
-const CANDIDATES = 12;
+const CANDIDATES = 14;
+const KEYWORD_CANDIDATES = 10;
 const FALLBACK_ITEMS = 5;
 const ANSWER_TIMEOUT_MS = 20000; // reading a whole article takes longer than picking titles
 const WEB_PAGES = 3;
@@ -117,6 +118,29 @@ async function matchArticles(vec: number[], sinceHours: number | null): Promise<
   return r ?? [];
 }
 
+// Words that carry no topic: commands and question words. What is left are the names and subjects.
+const FILLER = new Set([
+  "getir", "göster", "bul", "ver", "anlat", "söyle", "listele", "özetle", "haber", "haberi", "haberler", "haberleri",
+  "haberlerini", "son", "dakika", "durum", "durumu", "neler", "nedir", "nasıl", "nerede", "kimdir", "hakkında", "ilgili",
+  "var", "mı", "mi", "mu", "mü", "bana", "bize", "lütfen", "şu", "bugün", "dün", "gelişme", "gelişmeler", "gelişmeleri",
+  "ne", "oldu", "olmuş", "yaşandı", "yaşanan", "hakkındaki", "dair", "için", "gibi", "kadar", "bir", "bu", "ve", "ile",
+]);
+
+/** The topic words of a question: no commands or filler, at most 4, cut to 6 letters so that Turkish
+ *  suffixes still match ("galatasaray" also finds "Galatasaray'ın"). */
+function topicTerms(text: string): string[] {
+  const words = (text.match(/\p{L}[\p{L}\p{N}]*/gu) ?? []).map((w) => w.toLocaleLowerCase("tr"));
+  const kept = words.filter((w) => w.length >= 3 && !FILLER.has(w));
+  return [...new Set(kept.map((w) => w.slice(0, 6)))].slice(0, 4);
+}
+
+async function keywordArticles(terms: string[], sinceHours: number | null): Promise<Article[]> {
+  if (terms.length === 0) return [];
+  const since = sinceHours ? new Date(Date.now() - sinceHours * 3600_000).toISOString() : new Date(Date.now() - 72 * 3600_000).toISOString();
+  const rows = await rpc("keyword_articles", { terms, since, match_count: KEYWORD_CANDIDATES }).catch(() => []);
+  return (rows ?? []).map((r: Article & { hits: number }) => ({ ...r, similarity: 0 }));
+}
+
 function buildPrompt(question: string, articles: Article[], aboutTitle: string | null): string {
   const list = articles
     .map((a, i) => `[${i + 1}] ${a.title}\n${(a.summary ?? "").slice(0, 400)}`)
@@ -133,7 +157,9 @@ function buildPrompt(question: string, articles: Article[], aboutTitle: string |
     "that candidate, and do not use information from other candidates.",
     "Write correct Turkish using all diacritics (ç, ğ, ı, ö, ş, ü, İ).",
     "Always write numbers as digits (for example 30 bin, 249 dolar), never as words.",
-    "If no candidate is relevant, return an empty items list.",
+    "The question may be a command such as \"X haberlerini getir\" or a bare name; treat it as a request for",
+    "the news about X and select every candidate that is about X. Return an empty items list only when no",
+    "candidate is about the subject at all.",
     "Also fill `asked`: the specific pieces of information the user literally asked for, as short",
     "Turkish noun phrases (for example \"puan durumu\", \"dolar kuru\"), each with found=true if at",
     "least one candidate contains it and found=false if none does. List only what the user literally",
@@ -445,9 +471,13 @@ Deno.serve(async (req) => {
     lap("embed_ms", t);
 
     t = performance.now();
-    let articles = await matchArticles(vec, sinceHours);
-    if (aboutArticle && !articles.some((a) => a.id === aboutArticle.id)) articles.unshift(aboutArticle);
-    articles = articles.slice(0, CANDIDATES);
+    const vectorHits = await matchArticles(vec, sinceHours);
+    const terms = topicTerms(aboutArticle ? `${aboutArticle.title} ${question}` : question);
+    const keywordHits = await keywordArticles(terms, sinceHours);
+    // Keyword hits first (they include articles that have no embedding yet), then the vector neighbours.
+    const merged = new Map<string, Article>();
+    for (const a of [...(aboutArticle ? [aboutArticle] : []), ...keywordHits, ...vectorHits]) if (!merged.has(a.id)) merged.set(a.id, a);
+    const articles = [...merged.values()].slice(0, CANDIDATES);
     lap("search_ms", t);
     if (articles.length === 0) return { mode: "empty", items: [] };
 
@@ -495,6 +525,9 @@ Deno.serve(async (req) => {
         published_at: a.published_at,
         link: a.link,
       });
+    }
+    if (!items.length && keywordHits.length) {
+      return { mode: "fallback", reason: "model selected nothing", items: plainList(keywordHits), candidates: articles.length };
     }
     return {
       mode: items.length ? "answer" : "none_relevant",
