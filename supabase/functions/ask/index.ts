@@ -134,11 +134,11 @@ function topicTerms(text: string): string[] {
   return [...new Set(kept.map((w) => w.slice(0, 6)))].slice(0, 4);
 }
 
-async function keywordArticles(terms: string[], sinceHours: number | null): Promise<Article[]> {
+async function keywordArticles(terms: string[], sinceHours: number | null): Promise<(Article & { hits: number })[]> {
   if (terms.length === 0) return [];
   const since = sinceHours ? new Date(Date.now() - sinceHours * 3600_000).toISOString() : new Date(Date.now() - 72 * 3600_000).toISOString();
   const rows = await rpc("keyword_articles", { terms, since, match_count: KEYWORD_CANDIDATES }).catch(() => []);
-  return (rows ?? []).map((r: Article & { hits: number }) => ({ ...r, similarity: 0 }));
+  return (rows ?? []).map((r: Article & { hits: number }) => ({ ...r, similarity: 0, hits: r.hits }));
 }
 
 function buildPrompt(question: string, articles: Article[], aboutTitle: string | null): string {
@@ -157,12 +157,13 @@ function buildPrompt(question: string, articles: Article[], aboutTitle: string |
     "that candidate, and do not use information from other candidates.",
     "Write correct Turkish using all diacritics (ç, ğ, ı, ö, ş, ü, İ).",
     "Always write numbers as digits (for example 30 bin, 249 dolar), never as words.",
-    "The question may be a command such as \"X haberlerini getir\" or a bare name; treat it as a request for",
-    "the news about X and select every candidate that is about X. Return an empty items list only when no",
-    "candidate is about the subject at all.",
+    "If the question only names a subject (a bare name, or a command such as \"X haberlerini getir\"), treat it",
+    "as a request for the news about X and select every candidate that is about X. If it asks for something",
+    "specific, answer exactly that. Return an empty items list only when no candidate is about the subject.",
     "Also fill `asked`: the specific pieces of information the user literally asked for, as short",
     "Turkish noun phrases (for example \"puan durumu\", \"dolar kuru\"), each with found=true if at",
-    "least one candidate contains it and found=false if none does. List only what the user literally",
+    "least one candidate actually states it (a candidate about the same event that does not state it does not",
+    "count) and found=false if none does. List only what the user literally",
     "asked for, never aspects they did not mention. For an open question such as \"what happened\"",
     "return an empty list.",
     "",
@@ -526,8 +527,11 @@ Deno.serve(async (req) => {
         link: a.link,
       });
     }
-    if (!items.length && keywordHits.length) {
-      return { mode: "fallback", reason: "model selected nothing", items: plainList(keywordHits), candidates: articles.length };
+    // The model chose nothing. Show the keyword hits only when they are plainly the answer: every topic
+    // word of the question appears in them. A loose partial match would list unrelated news.
+    const exact = keywordHits.filter((a) => a.hits === terms.length);
+    if (!items.length && terms.length > 0 && terms.length <= 2 && exact.length) {
+      return { mode: "fallback", reason: "model selected nothing", items: plainList(exact), candidates: articles.length };
     }
     return {
       mode: items.length ? "answer" : "none_relevant",

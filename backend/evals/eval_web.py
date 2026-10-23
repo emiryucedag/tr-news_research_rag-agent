@@ -74,6 +74,22 @@ def looks_turkish(sentence):
     return english <= 3 and has_letters
 
 
+_BODIES = {}
+
+
+def source_text_of(item, row):
+    """What a story's text must be supported by. Stories written from the article are checked against
+    the article text, fetched again here (once per link); the rest against title and feed teaser."""
+    base = f"{row['title']} {row.get('summary') or ''}"
+    if not item.get("from_article"):
+        return base
+    if item["link"] not in _BODIES:
+        from articletext import fetch_text
+        from ingest import GATE, USER_AGENT
+        _BODIES[item["link"]] = fetch_text(item["link"], GATE, USER_AGENT)[0]
+    return f"{base} {_BODIES[item['link']]}"
+
+
 def check_items(scenario, items):
     """Checks that must hold for every generated sentence. Returns the stored rows."""
     links = [i["link"] for i in items]
@@ -87,7 +103,7 @@ def check_items(scenario, items):
             continue
         rows.append(row)
         sentence = item.get("sentence") or item.get("title") or ""
-        source_text = f"{row['title']} {row.get('summary') or ''}"
+        source_text = source_text_of(item, row)
         plain_title = row["language"] == "tr" and sentence == row["title"]  # allowed plain fallback
         if not plain_title:
             if not numbers_supported(sentence, source_text):
@@ -124,7 +140,7 @@ def check_story_fields(scenario, category, items):
         row = stored_article(item["link"])
         if row is None:
             continue
-        texts = [f"{row['title']} {row.get('summary') or ''}"]
+        texts = [source_text_of(item, row)]
         for other in item.get("also", []):
             other_row = stored_article(other["link"])
             if other_row is None:
