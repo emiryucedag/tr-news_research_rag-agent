@@ -40,7 +40,11 @@ RSS feeds -> filter -> store -> embed  ->  Postgres + pgvector  <-  Edge Functio
   articles are fetched with pgvector, and one model call selects the relevant ones. The
   model only sees numbered candidates and returns `[{n, sentence}]`; links, dates and
   source names are filled in by code, so the model cannot corrupt or invent them. Any
-  failure falls back to a plain list of titles and links.
+  failure falls back to a plain list of titles and links and gives the user's unit back.
+  Signed-in users (Supabase Auth JWT, verified in the function against the project's
+  public keys) get 10 questions per day; guests without a token get 1 per day per
+  salted IP hash. Both are also capped as groups. Counters live in the database,
+  reset at Turkish midnight and are incremented atomically before any model call.
 - **Database** (`supabase/migrations/`): `articles` with a 768-dimension embedding,
   row level security on and no public policies; only the server side can read or write.
 
@@ -68,10 +72,10 @@ article text or images; every answer links back to the source. Scraped data is n
 committed to this repository. Each feed carries a flag for whether its publisher's terms
 of use have been checked.
 
-Status: database schema, the `ask` function (spike), the hourly ingestion job and the
-cached category summaries are done and run hourly on GitHub Actions. Still to do:
-invitation login with per-user quotas, the web interface, and evaluations of the new
-query path.
+Status: database schema, the `ask` function with login and quotas, the hourly ingestion job
+and the cached category summaries are done; the jobs run hourly on GitHub Actions. Still
+to do: the web interface (login, category tabs, chat) and evaluations of the new query
+path.
 
 ---
 

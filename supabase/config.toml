@@ -1,6 +1,7 @@
 project_id = "news-agent"
 
-# Spike: the function checks its own x-spike-token header instead of a JWT.
-# Real access control (invited users, guest limits) replaces this in step 7.
+# The platform JWT check stays off for this function because guests call it without an
+# Authorization header. The function verifies signed-in users itself (see identify()
+# in functions/ask/index.ts) and applies a quota to everyone before any model call.
 [functions.ask]
 verify_jwt = false
