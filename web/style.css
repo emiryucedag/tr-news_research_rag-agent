@@ -30,8 +30,9 @@
   --yapay-zeka-accent: #B5430A;
   --populer-kultur-accent: #A62472;
 }
+/* Dark colours apply when the system is dark (unless the reader chose light) or when the reader chose dark. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --paper: #000000; --card: #1C1C1E; --ink: #F5F5F7; --soft: #A1A1A6; --sunk: #272729; --line: #38383A;
     --brand: #2997FF; --on-brand: #000000; --focus: #2997FF; --warn: #F0B35C; --frost: rgb(0 0 0 / 0.72);
       --gundem-accent: #8FB0F5;
@@ -44,6 +45,20 @@
       --populer-kultur-accent: #F192C9;
   }
 }
+:root[data-theme="dark"] {
+    --paper: #000000; --card: #1C1C1E; --ink: #F5F5F7; --soft: #A1A1A6; --sunk: #272729; --line: #38383A;
+    --brand: #2997FF; --on-brand: #000000; --focus: #2997FF; --warn: #F0B35C; --frost: rgb(0 0 0 / 0.72);
+      --gundem-accent: #8FB0F5;
+      --siyaset-accent: #F28C95;
+      --spor-accent: #7ED69B;
+      --ekonomi-accent: #EDC04F;
+      --teknoloji-accent: #7ECFDB;
+      --dunya-accent: #B7A2F2;
+      --yapay-zeka-accent: #F6A06B;
+      --populer-kultur-accent: #F192C9;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 body[data-section="gundem"] { --accent: var(--gundem-accent); }
 body[data-section="siyaset"] { --accent: var(--siyaset-accent); }
@@ -205,6 +220,17 @@ svg { display: block; flex: none; }
 
 /* Switch between the list and the card deck (top right), and the deck ----------------------------------------------- */
 
+.theme-btn { display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); }
+.theme-btn:hover { background: var(--sunk); }
+.theme-btn:active { transform: scale(0.95); }
+.theme-btn svg { width: 20px; height: 20px; }
+.theme-btn .sun { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-btn .sun { display: block; }
+  :root:not([data-theme="light"]) .theme-btn .moon { display: none; }
+}
+:root[data-theme="dark"] .theme-btn .sun { display: block; }
+:root[data-theme="dark"] .theme-btn .moon { display: none; }
 .seg { display: inline-flex; padding: 2px; border-radius: 999px; background: var(--sunk); }
 .seg button { display: grid; place-items: center; width: 40px; height: 36px; border: 0; border-radius: 999px; background: transparent; color: var(--soft); }
 .seg button svg { width: 18px; height: 18px; }
@@ -342,6 +368,6 @@ dialog[open] .sheet { animation: sheet-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); 
 
 @media (prefers-reduced-motion: reduce) {
   .stories.reveal .story, dialog[open] .sheet, .skeleton span, .steps li:last-child::before { animation: none; }
-  .btn:active, .topic:active, .story:active, .rail-tab:active, .icon-btn:active { transform: none; }
+  .theme-btn:active, .btn:active, .topic:active, .story:active, .rail-tab:active, .icon-btn:active { transform: none; }
   .deck-card { transition: none; }
 }

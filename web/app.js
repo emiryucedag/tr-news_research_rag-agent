@@ -1018,6 +1018,27 @@ document.addEventListener("visibilitychange", async () => {
 $("sd-close").replaceChildren(glyph("close"));
 $("pd-close").replaceChildren(glyph("close"));
 $("prefs-open").replaceChildren(glyph("sliders"), "Sana göre");
+// --- light or dark: follows the system until the reader picks one, then remembers the choice ---------
+
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+const effectiveTheme = () => document.documentElement.dataset.theme || (systemDark.matches ? "dark" : "light");
+
+function syncTheme() {
+  const dark = effectiveTheme() === "dark";
+  $("theme-btn").setAttribute("aria-label", dark ? "Açık temaya geç" : "Koyu temaya geç");
+  const paper = getComputedStyle(document.body).getPropertyValue("--paper").trim();
+  document.querySelector('meta[name="theme-color"]').setAttribute("content", paper);
+}
+
+$("theme-btn").addEventListener("click", () => {
+  const next = effectiveTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme-v1", next); } catch { /* the choice is a convenience only */ }
+  syncTheme();
+});
+systemDark.addEventListener("change", syncTheme);
+syncTheme();
+
 $("flow-v").addEventListener("click", () => flow !== "v" && setFlow("v"));
 $("flow-h").addEventListener("click", () => flow !== "h" && setFlow("h"));
 syncFlowButtons();

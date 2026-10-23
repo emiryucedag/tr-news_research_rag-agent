@@ -2,6 +2,7 @@
 <html lang="tr">
 <head>
   <meta charset="utf-8">
+  <script>try { var t = localStorage.getItem("theme-v1"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Tr News Agent</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -28,6 +29,10 @@
     </div>
     <div class="tools">
       <p class="pulse" id="pulse" role="status">Güncelleme durumu kontrol ediliyor…</p>
+      <button type="button" class="theme-btn" id="theme-btn" aria-label="Koyu temaya geç" title="Tema">
+        <svg class="ico moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8 8 0 0 1 9.8 4a8 8 0 1 0 10.2 10.2z"/></svg>
+        <svg class="ico sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>
+      </button>
       <div class="seg" role="group" aria-label="Haber görünümü">
         <button type="button" id="flow-v" aria-pressed="true" aria-label="Dikey akış" title="Dikey akış"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4.5" width="16" height="6" rx="1.6"/><rect x="4" y="13.5" width="16" height="6" rx="1.6"/></svg></button>
         <button type="button" id="flow-h" aria-pressed="false" aria-label="Kart akışı, kaydırarak oku" title="Kart akışı (kaydır)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="7" width="12" height="13" rx="2"/><path d="M8.5 4h7"/></svg></button>
