@@ -83,7 +83,6 @@ FEEDS = [
     _feed("Sabah Gundem", "Sabah", "https://www.sabah.com.tr/rss/gundem.xml", "gundem"),
     _feed("CNN Turk", "CNN Turk", "https://www.cnnturk.com/feed/rss/all/news", "gundem", tz_fix_hours=-3),
     _feed("CNN Turk Turkiye", "CNN Turk", "https://www.cnnturk.com/feed/rss/turkiye/news", "gundem", tz_fix_hours=-3),
-    _feed("TRT Haber", "TRT Haber", "https://www.trthaber.com/sondakika.rss", "gundem", terms="restrictive"),
     _feed("Sozcu", "Sozcu", "https://www.sozcu.com.tr/feeds-rss-category-gundem", "gundem"),
     _feed("Cumhuriyet", "Cumhuriyet", "https://www.cumhuriyet.com.tr/rss/son_dakika.xml", "gundem"),
     _feed("BBC Turkce", "BBC Turkce", "https://feeds.bbci.co.uk/turkce/rss.xml", "gundem"),
@@ -98,7 +97,6 @@ FEEDS = [
     _feed("Hurriyet Spor", "Hurriyet", "https://www.hurriyet.com.tr/rss/spor", "spor"),
     _feed("Sabah Spor", "Sabah", "https://www.sabah.com.tr/rss/spor.xml", "spor"),
     _feed("CNN Turk Spor", "CNN Turk", "https://www.cnnturk.com/feed/rss/spor/news", "spor", tz_fix_hours=-3),
-    _feed("TRT Haber Spor", "TRT Haber", "https://www.trthaber.com/spor_articles.rss", "spor", terms="restrictive"),
 
     # ekonomi
     _feed("CNN Turk Ekonomi", "CNN Turk", "https://www.cnnturk.com/feed/rss/ekonomi/news", "ekonomi", tz_fix_hours=-3),
@@ -116,12 +114,10 @@ FEEDS = [
 
     # dunya
     _feed("CNN Turk Dunya", "CNN Turk", "https://www.cnnturk.com/feed/rss/dunya/news", "dunya", tz_fix_hours=-3),
-    _feed("TRT Haber Dunya", "TRT Haber", "https://www.trthaber.com/dunya_articles.rss", "dunya", terms="restrictive"),
     _feed("Hurriyet Dunya", "Hurriyet", "https://www.hurriyet.com.tr/rss/dunya", "dunya"),
     _feed("Sabah Dunya", "Sabah", "https://www.sabah.com.tr/rss/dunya.xml", "dunya"),
     _feed("Sozcu Dunya", "Sozcu", "https://www.sozcu.com.tr/feeds-rss-category-dunya", "dunya"),
     _feed("BBC World", "BBC News", "http://feeds.bbci.co.uk/news/world/rss.xml", "dunya", "en"),
-    _feed("NPR World", "NPR", "https://feeds.npr.org/1004/rss.xml", "dunya", "en", terms="personal-only"),
 
     # yapay-zeka
     _feed("TechCrunch AI", "TechCrunch", "https://techcrunch.com/category/artificial-intelligence/feed/", "yapay-zeka", "en", terms="explicit"),
@@ -141,6 +137,8 @@ FEEDS = [
 #   Haberturk and Milliyet politics feeds (stale for years), Yeni Safak politics (empty),
 #   NTV Ekonomi (dead), VentureBeat (429), IGN (501), Hugging Face blog (no summaries),
 #   Al Jazeera (terms forbid automated access).
+# Removed on 2026-10-23: TRT Haber (its terms forbid quoting beyond individual use) and NPR (its feeds are
+#   offered for personal, non-commercial use only).
 # Removed on 2026-10-23 after reading NTV's own RSS notice (6 Oct 2023): it allows RSS content only for
 #   non-commercial personal use and rejects adapting it or making another work from it.
 # Removed on 2026-10-23 after reading their robots.txt files:
