@@ -12,10 +12,10 @@ sources, Turkish output) with source-cited answers. It is being built in two sta
 ## Web app (in progress)
 
 Goal: users pick a category (politics, sports, economy, technology, world, AI, pop
-culture, general news) and read hourly-refreshed summaries; inside the app they can
-also ask a chatbot about a specific topic. Access is by invitation (about ten users,
-10 chat questions per user per day), plus one trial question per day for guests.
-Everything uses free tiers only.
+culture, general news) and read hourly-refreshed summaries; they can also ask a chatbot
+about a specific topic. The summaries are the same for everyone and cost no model call per
+reader, so they are public. The chat is limited: invited users (about ten, by hand) get 10
+questions per day, guests get one trial question per day. Everything uses free tiers only.
 
 ```
 GitHub Actions (hourly)                         Supabase                       Browser
@@ -45,6 +45,10 @@ RSS feeds -> filter -> store -> embed  ->  Postgres + pgvector  <-  Edge Functio
   public keys) get 10 questions per day; guests without a token get 1 per day per
   salted IP hash. Both are also capped as groups. Counters live in the database,
   reset at Turkish midnight and are incremented atomically before any model call.
+- **Invitation requests** (`supabase/functions/request-invite/`): visitors leave an email
+  address and a short note, never a password. The request is validated, rate limited
+  (3 per visitor and 50 in total per day), protected by a hidden bot-trap field and stored in
+  a table the owner reads in the dashboard; an invited person chooses their own password.
 - **Database** (`supabase/migrations/`): `articles` with a 768-dimension embedding,
   row level security on and no public policies; only the server side can read or write.
 
@@ -62,13 +66,16 @@ What was measured on a 50-article table with `gemini-3.5-flash-lite`:
 ### Evaluating the web query path
 
 `backend/evals/eval_web.py` checks the stored summaries and the deployed `ask` function
-(about 170 checks, 7 questions, a few minutes). News changes every hour, so the checks look
+(about 180 checks, 7 questions, a few minutes). News changes every hour, so the checks look
 at properties of an answer instead of exact wording: every link exists in the database, every
 number and name in a sentence is supported by the article it links to, a question about
 nothing returns nothing, and a judge model says whether the items fit the question or the
 section. The judge is a different model from the writer so it does not grade its own work,
 and it is calibrated on obvious cases before its verdicts are trusted (`--judge-test`).
-`--self-test` feeds deliberately broken answers to the checks to prove they can fail.
+`--self-test` feeds deliberately broken answers to the checks to prove they can fail. A
+third group of checks uses the public key that ships with the website and requires that it
+can read the summaries and nothing else: no articles, no usage counters, no invitation
+requests, no writes, no server functions.
 
 What the evaluations found and what was changed:
 
@@ -100,12 +107,12 @@ article text or images; every answer links back to the source. Scraped data is n
 committed to this repository. Each feed carries a flag for whether its publisher's terms
 of use have been checked.
 
-Status: database schema, the `ask` function with login and quotas, the hourly ingestion job,
-the cached category summaries, evaluations of the query path and a plain web interface
-(`web/`: login, category tabs, chat) are done. The jobs run hourly on GitHub Actions and the
+Status: database schema, the `ask` function with login and quotas, the invitation request
+form, the hourly ingestion job, the cached category summaries, evaluations of the query path
+and a plain web interface (`web/`) are done. The jobs run hourly on GitHub Actions and the
 site is published to GitHub Pages by `.github/workflows/pages.yml` whenever `web/` changes:
-https://emiryucedag.github.io/tr-news_research_rag-agent/ (category tabs and the full chat
-need an invited account). Still to do: a nicer interface and an invitation request form.
+https://emiryucedag.github.io/tr-news_research_rag-agent/ (summaries are public; the full
+chat needs an invited account). Still to do: a nicer interface.
 
 ---
 

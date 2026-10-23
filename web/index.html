@@ -10,32 +10,40 @@
 <body>
   <header class="top">
     <h1>Haber Özeti</h1>
-    <div id="account" hidden>
-      <span id="account-email"></span>
-      <button id="logout" type="button" class="link-button">Çıkış</button>
+    <div id="account">
+      <button id="login-toggle" type="button" class="link-button" aria-expanded="false" aria-controls="login-panel">Giriş yap</button>
+      <span id="account-email" hidden></span>
+      <button id="logout" type="button" class="link-button" hidden>Çıkış</button>
     </div>
   </header>
 
   <main>
-    <!-- Shown when signed out -->
-    <section id="login-view" hidden>
+    <!-- Opened from the header button; the page itself needs no login. -->
+    <section id="login-panel" hidden>
       <h2>Giriş</h2>
-      <p class="muted">Kategori özetleri davetli kullanıcılara açık. <span id="invite-hint"></span></p>
+      <p class="muted">Davetli kullanıcılar giriş yaparak günde 10 soru sorabilir.</p>
       <form id="login-form">
         <label>E-posta <input id="login-email" type="email" autocomplete="email" required></label>
         <label>Şifre <input id="login-password" type="password" autocomplete="current-password" required></label>
         <button type="submit" id="login-submit">Giriş yap</button>
         <p id="login-error" class="error" role="alert" hidden></p>
       </form>
+
+      <h2>Davet iste</h2>
+      <p class="muted">E-posta adresini bırak. Uygun görülürse davet e-postası alırsın ve şifreni kendin belirlersin. Şifre istemiyoruz.</p>
+      <form id="invite-form">
+        <label>E-posta <input id="invite-email" type="email" autocomplete="email" required maxlength="254"></label>
+        <label>Kısa not (isteğe bağlı) <input id="invite-note" type="text" maxlength="300"></label>
+        <!-- Bot trap: people never see or fill this field. -->
+        <input id="invite-website" class="trap" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <button type="submit" id="invite-submit">Davet iste</button>
+        <p id="invite-message" class="muted" role="status" hidden></p>
+      </form>
     </section>
 
-    <!-- Shown when signed in -->
-    <section id="app-view" hidden>
-      <nav id="tabs" aria-label="Kategoriler"></nav>
-      <div id="summary" aria-live="polite"></div>
-    </section>
+    <nav id="tabs" aria-label="Kategoriler"></nav>
+    <div id="summary" aria-live="polite"></div>
 
-    <!-- Always visible: signed-in users and guests share the same chat -->
     <section id="chat">
       <h2>Habere soru sor</h2>
       <p class="muted" id="chat-scope"></p>

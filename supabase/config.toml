@@ -5,3 +5,7 @@ project_id = "news-agent"
 # in functions/ask/index.ts) and applies a quota to everyone before any model call.
 [functions.ask]
 verify_jwt = false
+
+# Public form: anyone may submit; the function validates, rate limits and stores the request.
+[functions.request-invite]
+verify_jwt = false

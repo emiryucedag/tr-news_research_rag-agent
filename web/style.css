@@ -136,3 +136,14 @@ footer {
   color: var(--muted);
   border-top: 1px solid var(--border);
 }
+
+/* Bot trap field: off screen, never shown to people. */
+.trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+
+#login-panel {
+  margin: 8px 0 16px;
+  padding: 4px 16px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}

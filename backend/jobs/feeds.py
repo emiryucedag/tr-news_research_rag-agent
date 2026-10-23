@@ -30,7 +30,8 @@ CATEGORY_TOPICS = {
     "spor": "sports news and results",
     "ekonomi": "economy and finance: markets, prices, central banks, companies and business",
     "teknoloji": "technology: devices, software, the internet and the technology business",
-    "dunya": "international news and world affairs outside Turkey's domestic news",
+    "dunya": ("international news: events in other countries and relations between countries; "
+              "stories that are mainly about Turkey's own domestic affairs belong elsewhere"),
     "yapay-zeka": "artificial intelligence: models, companies, products, research and regulation",
     "populer-kultur": "entertainment: TV series, films, streaming, celebrities and music",
 }

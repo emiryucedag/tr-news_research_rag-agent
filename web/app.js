@@ -1,10 +1,11 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, INVITE_CONTACT } from "./config.js";
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "./config.js";
 
 // supabase-js keeps the session in the browser and refreshes it by itself, so a user
 // signs in once and stays signed in until they log out or clear site data.
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 const ASK_URL = `${SUPABASE_URL}/functions/v1/ask`;
+const INVITE_URL = `${SUPABASE_URL}/functions/v1/request-invite`;
 
 const CATEGORIES = [
   ["gundem", "Gündem"],
@@ -68,7 +69,14 @@ async function accessToken() {
   return data.session?.access_token ?? null;
 }
 
-// --- sign in / out ------------------------------------------------------------
+// --- login panel, sign in / out, invitation requests ----------------------------
+
+$("login-toggle").addEventListener("click", () => {
+  const panel = $("login-panel");
+  panel.hidden = !panel.hidden;
+  $("login-toggle").setAttribute("aria-expanded", String(!panel.hidden));
+  if (!panel.hidden) $("login-email").focus();
+});
 
 $("login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -85,10 +93,44 @@ $("login-form").addEventListener("submit", async (event) => {
     error.textContent = "E-posta veya şifre hatalı.";
     error.hidden = false;
   }
-  // On success onAuthStateChange fires and renders the signed-in view.
+  // On success onAuthStateChange fires and render() closes the panel.
 });
 
 $("logout").addEventListener("click", () => supabase.auth.signOut());
+
+// The form sends an email address and a short note. No password is ever asked for.
+$("invite-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("invite-submit");
+  const message = $("invite-message");
+  button.disabled = true;
+  message.hidden = true;
+  let text = "Şu an gönderemedim. Biraz sonra tekrar dene.";
+  try {
+    const response = await fetch(INVITE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: $("invite-email").value.trim(),
+        note: $("invite-note").value.trim(),
+        website: $("invite-website").value, // the bot trap
+      }),
+    });
+    if (response.ok) {
+      text = "İsteğin alındı. Uygun görülürse e-postana davet gelecek.";
+      $("invite-form").reset();
+    } else if (response.status === 400) {
+      text = "Geçerli bir e-posta adresi yaz.";
+    } else if (response.status === 429) {
+      text = "Bugün çok fazla istek gönderdin. Yarın tekrar dene.";
+    }
+  } catch {
+    text = "Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.";
+  }
+  message.textContent = text;
+  message.hidden = false;
+  button.disabled = false;
+});
 
 // --- category tabs ------------------------------------------------------------
 
@@ -211,45 +253,26 @@ $("chat-form").addEventListener("submit", async (event) => {
 
 // --- view switching -----------------------------------------------------------
 
+/** The tabs are the same for everyone; only the account area and the chat quota change. */
 function render(session) {
   signedIn = Boolean(session);
-  $("login-view").hidden = signedIn;
-  $("app-view").hidden = !signedIn;
-  $("account").hidden = !signedIn;
+  $("login-toggle").hidden = signedIn;
+  $("logout").hidden = !signedIn;
+  $("account-email").hidden = !signedIn;
   $("account-email").textContent = session?.user?.email ?? "";
+  if (signedIn) {
+    $("login-panel").hidden = true;
+    $("login-toggle").setAttribute("aria-expanded", "false");
+  }
+  $("login-password").value = "";
   $("chat-quota").textContent = "";
   setContent($("chat-answer"));
   $("chat-scope").textContent = signedIn
     ? "Her gün 10 soru sorabilirsin."
-    : "Giriş yapmadan günde 1 soru sorabilirsin.";
-
-  if (signedIn) {
-    if (!activeCategory) activeCategory = CATEGORIES[0][0];
-    summaryCache.clear();
-    selectCategory(activeCategory);
-  } else {
-    activeCategory = null;
-    $("login-password").value = "";
-  }
+    : "Misafir olarak günde 1 soru sorabilirsin. Daha fazlası için giriş yap.";
 }
 
-// Invitation hint on the login screen.
-const hint = $("invite-hint");
-if (INVITE_CONTACT) {
-  hint.append("Davet için ", h("a", { href: safeUrl(INVITE_CONTACT) }, "iletişime geç"), ".");
-} else {
-  hint.append("Davet için site sahibiyle iletişime geç.");
-}
-
-// Token refreshes also fire auth events; only redraw when the signed-in user changes,
-// otherwise an hourly refresh would wipe the chat answer on screen.
-let lastUserId;
-function onSession(session) {
-  const userId = session?.user?.id ?? null;
-  if (userId === lastUserId) return;
-  lastUserId = userId;
-  render(session);
-}
+selectCategory(CATEGORIES[0][0]);
 
 supabase.auth.onAuthStateChange((_event, session) => onSession(session));
 supabase.auth.getSession().then(({ data }) => onSession(data.session));

@@ -1,6 +1,7 @@
 """Evaluations for the web app's query path and cached summaries.
 
-Part A checks the stored category summaries. Part B sends a handful of questions to the
+Part A checks the stored category summaries. Part C checks that the public key reaches only the
+summaries. Part B sends a handful of questions to the
 deployed `ask` function using the evaluation key (its own small daily quota of 60). News
 changes every hour, so checks look at properties of an answer, never at exact wording:
 links exist, numbers and names are supported by the linked article, nothing is invented
@@ -36,7 +37,9 @@ JUDGE_MODEL = "gemini-3.1-flash-lite"  # not the generator (gemini-3.5-flash-lit
 TURKISH_LETTERS = set("çğıöşüÇĞİÖŞÜ")
 ENGLISH_STOPWORDS = {"the", "and", "of", "to", "in", "for", "with", "is", "are", "its", "on", "at"}
 SLOW_MS = 8000
-MAX_OFF_TOPIC_TAB = 1       # at most this many items per tab may be off topic
+MAX_OFF_TOPIC_TAB = 2       # at most this many items per tab (25 percent of 8) may be flagged off topic.
+                            # Topic borders are fuzzy (a story about Turkey's foreign policy) and two
+                            # models can disagree on them, so one flagged story must not fail a tab.
 MAX_IRRELEVANT_SHARE = 0.25  # at most this share of a chat answer may be irrelevant
 
 results = []  # (scenario, check, "PASS" | "FAIL" | "WARN", detail)
@@ -191,6 +194,64 @@ def eval_summaries():
             else:
                 check(name, "judge: items belong to this section", len(bad) <= MAX_OFF_TOPIC_TAB,
                       f"{len(bad)} off topic: {[row['items'][n - 1]['sentence'][:60] for n in bad]}")
+
+
+# --- part C: what the public key can and cannot reach --------------------------------
+
+def public_key():
+    """The publishable key exactly as the public website ships it."""
+    text = (Path(__file__).resolve().parent.parent.parent / "web" / "config.js").read_text(encoding="utf-8")
+    return re.search(r'SUPABASE_PUBLISHABLE_KEY\s*=\s*"([^"]+)"', text).group(1)
+
+
+def eval_public_boundaries():
+    """Anyone can copy the key out of the website, so these must hold for whoever has it:
+    category summaries are readable, nothing else is readable, nothing is writable."""
+    print("\n== Part C: what the public key can reach ==")
+    base = get_env("SUPABASE_URL").rstrip("/") + "/rest/v1"
+    headers = {"apikey": public_key(), "Content-Type": "application/json"}
+
+    def call(method, path, **kw):
+        return httpx.request(method, f"{base}/{path}", headers=headers, timeout=30, **kw)
+
+    def blocked(response):
+        """Refused outright, or allowed but nothing came back."""
+        if response.status_code >= 400:
+            return True
+        try:
+            return response.json() in ([], None)
+        except ValueError:
+            return True
+
+    s = "public/read"
+    r = call("GET", "category_summaries?select=category&limit=1")
+    check(s, "category summaries are readable", r.status_code == 200 and len(r.json()) == 1, f"HTTP {r.status_code}")
+    for table in ("articles", "usage_daily", "invite_requests"):
+        r = call("GET", f"{table}?select=*&limit=1")
+        check(s, f"{table} is not readable", blocked(r), f"HTTP {r.status_code} {r.text[:80]}")
+
+    s = "public/write"
+    r = call("POST", "category_summaries", json={"category": "spor", "mode": "empty"})
+    check(s, "cannot insert into category_summaries", r.status_code >= 400, f"HTTP {r.status_code}")
+    r = call("PATCH", "category_summaries?category=eq.spor", json={"mode": "empty"})
+    still_there = call("GET", "category_summaries?select=mode&category=eq.spor").json()
+    check(s, "cannot change category_summaries", r.status_code >= 400 or (still_there and still_there[0]["mode"] != "empty"),
+          f"HTTP {r.status_code}")
+    r = call("DELETE", "category_summaries?category=eq.spor")
+    check(s, "cannot delete from category_summaries", r.status_code >= 400
+          or len(call("GET", "category_summaries?select=category&category=eq.spor").json()) == 1, f"HTTP {r.status_code}")
+    r = call("POST", "invite_requests", json={"email": "direct@eval.invalid"})
+    check(s, "cannot insert invitation requests directly", r.status_code >= 400, f"HTTP {r.status_code}")
+    r = call("POST", "articles", json={"id": "x", "title": "x", "link": "https://eval.invalid/x", "source": "x",
+                                       "published_at": "2026-01-01T00:00:00Z"})
+    check(s, "cannot insert articles", r.status_code >= 400, f"HTTP {r.status_code}")
+
+    s = "public/functions"
+    zero = "[" + ",".join(["0"] * 768) + "]"
+    r = call("POST", "rpc/match_articles", json={"query_embedding": zero, "match_count": 1})
+    check(s, "match_articles is not callable", r.status_code >= 400, f"HTTP {r.status_code}")
+    r = call("POST", "rpc/consume_quota", json={"p_subject": "eval:x", "p_limit": 1, "p_pool": "eval:p", "p_pool_limit": 1})
+    check(s, "consume_quota is not callable", r.status_code >= 400, f"HTTP {r.status_code}")
 
 
 # --- part B: the ask function -----------------------------------------------------
@@ -372,6 +433,7 @@ def main():
 
     started = time.time()
     eval_summaries()
+    eval_public_boundaries()
     if not args.summaries:
         eval_ask()
 

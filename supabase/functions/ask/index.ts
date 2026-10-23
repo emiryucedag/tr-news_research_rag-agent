@@ -8,6 +8,7 @@
 // source names are rendered here in code, so the model cannot corrupt or invent them.
 // If anything goes wrong we fall back to a plain title + link list and give the unit back.
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@5";
+import { json, corsHeaders, nextResetIso, rpc, visitorHash } from "../_shared/http.ts";
 
 const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
 const EMBED_MODEL = "gemini-embedding-001";
@@ -20,7 +21,6 @@ const MAX_QUESTION_CHARS = 300;
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const IP_SALT = Deno.env.get("IP_SALT")!;
 
 const num = (name: string, fallback: number) => Number(Deno.env.get(name) ?? fallback);
 const USER_DAILY_LIMIT = num("USER_DAILY_LIMIT", 10);
@@ -29,9 +29,6 @@ const GUEST_DAILY_LIMIT = num("GUEST_DAILY_LIMIT", 1); // per IP
 const GUEST_POOL_LIMIT = num("GUEST_POOL_LIMIT", 30); // all guests together
 const EVAL_DAILY_LIMIT = num("EVAL_DAILY_LIMIT", 60); // the evaluation runner, with its own pool
 const EVAL_KEY = Deno.env.get("EVAL_KEY") ?? "";
-
-const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") ??
-  "http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173").split(",").map((s) => s.trim());
 
 const JWKS = createRemoteJWKSet(new URL(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`));
 
@@ -48,42 +45,12 @@ type Article = {
 
 type Identity = { scope: "user" | "guest" | "eval"; subject: string; limit: number; pool: string; poolLimit: number };
 
-// --- http helpers -------------------------------------------------------------
-
-function corsHeaders(req: Request): Record<string, string> {
-  const origin = req.headers.get("origin");
-  const headers: Record<string, string> = { Vary: "Origin" };
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
-    headers["Access-Control-Allow-Origin"] = origin;
-    headers["Access-Control-Allow-Headers"] = "authorization, content-type, apikey, x-client-info";
-    headers["Access-Control-Allow-Methods"] = "POST, OPTIONS";
-  }
-  return headers;
-}
-
-function json(req: Request, body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", ...corsHeaders(req) },
-  });
-}
-
 // --- identity -----------------------------------------------------------------
-
-async function sha256Hex(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 function timingSafeEqual(a: string, b: string): boolean {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
-}
-
-function clientIp(req: Request): string {
-  return req.headers.get("cf-connecting-ip") ??
-    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
 }
 
 /** Returns the caller's identity, or null when an Authorization header is present but invalid. */
@@ -98,8 +65,7 @@ async function identify(req: Request): Promise<Identity | null> {
   }
   const auth = req.headers.get("authorization");
   if (!auth) {
-    const ipHash = (await sha256Hex(`${IP_SALT}:${clientIp(req)}`)).slice(0, 32);
-    return { scope: "guest", subject: `guest:${ipHash}`, limit: GUEST_DAILY_LIMIT, pool: "pool:guests", poolLimit: GUEST_POOL_LIMIT };
+    return { scope: "guest", subject: `guest:${await visitorHash(req)}`, limit: GUEST_DAILY_LIMIT, pool: "pool:guests", poolLimit: GUEST_POOL_LIMIT };
   }
   try {
     const token = auth.replace(/^Bearer\s+/i, "");
@@ -115,24 +81,6 @@ async function identify(req: Request): Promise<Identity | null> {
 }
 
 // --- quota --------------------------------------------------------------------
-
-async function rpc(name: string, args: Record<string, unknown>) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
-    method: "POST",
-    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify(args),
-  });
-  if (!r.ok) throw new Error(`${name} ${r.status}: ${(await r.text()).slice(0, 160)}`);
-  return r.status === 204 ? null : await r.json().catch(() => null);
-}
-
-/** The Turkish day ends at 21:00 UTC (Turkey is permanently UTC+3). */
-function nextResetIso(): string {
-  const now = new Date();
-  const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 21, 0, 0));
-  if (reset <= now) reset.setUTCDate(reset.getUTCDate() + 1);
-  return reset.toISOString();
-}
 
 // --- gemini -------------------------------------------------------------------
 
