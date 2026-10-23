@@ -72,10 +72,12 @@ article text or images; every answer links back to the source. Scraped data is n
 committed to this repository. Each feed carries a flag for whether its publisher's terms
 of use have been checked.
 
-Status: database schema, the `ask` function with login and quotas, the hourly ingestion job
-and the cached category summaries are done; the jobs run hourly on GitHub Actions. Still
-to do: the web interface (login, category tabs, chat) and evaluations of the new query
-path.
+Status: database schema, the `ask` function with login and quotas, the hourly ingestion job,
+the cached category summaries and a plain web interface (`web/`: login, category tabs, chat)
+are done. The jobs run hourly on GitHub Actions and the site is published to GitHub Pages
+by `.github/workflows/pages.yml` whenever `web/` changes:
+https://emiryucedag.github.io/tr-news_research_rag-agent/ (category tabs and the full chat
+need an invited account). Still to do: a nicer interface and evaluations of the new query path.
 
 ---
 
@@ -289,7 +291,8 @@ news-agent/
 ├── supabase/
 │   ├── migrations/               # database schema
 │   └── functions/ask/            # chat Edge Function
-└── .github/workflows/            # scheduled jobs
+├── web/                          # static site: login, category tabs, chat
+└── .github/workflows/            # hourly jobs and the Pages deployment
 ```
 
 Scraped article data (`backend/ingestion/news_data.json`) is created locally by the
