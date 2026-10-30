@@ -304,6 +304,11 @@ function loadFlow() {
 
 let flow = loadFlow();
 
+// On a wide screen (the same width where the side rail appears) the deck is not offered: the list fills the
+// page better there. The saved choice is kept, so it applies again on a phone.
+const wideScreen = window.matchMedia("(min-width: 62rem)");
+const deckAllowed = () => !wideScreen.matches;
+
 function setFlow(next) {
   flow = next;
   try { localStorage.setItem(FLOW_KEY, next); } catch { /* the choice is a convenience only */ }
@@ -319,7 +324,7 @@ function syncFlowButtons() {
 /** One lead story, then the rest of the front page, then a plainer list under "more". In the card flow the
  *  same stories are a deck: one card at a time, thrown to either side to reach the next. */
 function storiesGrid(items, { withLead = true, key = "all" } = {}) {
-  if (flow === "h") return storiesDeck(items, key);
+  if (flow === "h" && deckAllowed()) return storiesDeck(items, key);
   const grid = h("div", { class: "stories reveal" });
   items.forEach((item, i) => {
     if (i === 8) grid.append(h("h3", { class: "more-title" }, "Daha fazla haber"));
@@ -1039,6 +1044,7 @@ $("theme-btn").addEventListener("click", () => {
 systemDark.addEventListener("change", syncTheme);
 syncTheme();
 
+wideScreen.addEventListener("change", () => flow === "h" && renderSection());
 $("flow-v").addEventListener("click", () => flow !== "v" && setFlow("v"));
 $("flow-h").addEventListener("click", () => flow !== "h" && setFlow("h"));
 syncFlowButtons();

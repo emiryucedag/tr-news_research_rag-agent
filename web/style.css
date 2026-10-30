@@ -236,6 +236,7 @@ svg { display: block; flex: none; }
 .seg button svg { width: 18px; height: 18px; }
 .seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); }
 .seg button:active { transform: scale(0.95); }
+@media (min-width: 62rem) { .seg { display: none; } }
 
 .deck { max-width: 34rem; margin: 32px auto 0; outline: none; }
 .deck:focus-visible .deck-stage { outline: 2px solid var(--focus); outline-offset: 6px; border-radius: var(--r-card); }
