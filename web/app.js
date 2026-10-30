@@ -29,6 +29,8 @@ const GLYPHS = {
   "yapay-zeka": '<circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="7" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M8.2 7h7.6M7.2 9l3.8 7M16.8 9l-3.8 7"/>',
   "populer-kultur": '<rect x="3.5" y="5" width="17" height="14" rx="2.4"/><path d="M10.2 9.4v5.2l4.4-2.6z" fill="currentColor"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  chat: '<path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8L6.5 20v-3.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z"/>',
+  send: '<path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
   chevronL: '<path d="M14.5 5.5 8 12l6.5 6.5"/>',
   chevronR: '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
@@ -740,11 +742,85 @@ async function runAsk({ question, about, button, out, quotaEl }) {
   }
 }
 
+// --- the chat: a conversation panel, docked on wide screens and a pop-up elsewhere -----------
+
+const chatDialog = $("chat");
+const chatLog = $("chat-answer");
+const chatInput = $("chat-input");
+const chatDocked = window.matchMedia("(min-width: 90rem)");
+const CHAT_EXAMPLES = ["Merkez Bankası faiz kararı ne oldu?", "Bugün spor dünyasında neler oldu?", "Yapay zekâda son gelişmeler neler?"];
+
+/** The empty state: one line about what the chat reads, and a few questions to start from. */
+function chatIntro() {
+  const box = h("div", { class: "chat-intro" }, h("p", {}, "Son 3 günün haberlerinden cevap veririm. Bir haberin penceresinden sorarsan haberin sayfasını da okurum."));
+  const row = h("div", { class: "chat-examples" });
+  for (const text of CHAT_EXAMPLES) {
+    const button = h("button", { type: "button", class: "topic" }, text);
+    button.addEventListener("click", () => askInChat(text));
+    row.append(button);
+  }
+  box.append(row);
+  return box;
+}
+
+function resetChat() {
+  setContent(chatLog, chatIntro());
+}
+
+async function askInChat(question) {
+  if ($("chat-submit").disabled) return;
+  chatLog.querySelector(".chat-intro")?.remove();
+  const bubble = h("div", { class: "msg-user" }, question);
+  const out = h("div", { class: "msg-bot" });
+  chatLog.append(bubble, out);
+  chatInput.value = "";
+  growChatInput();
+  bubble.scrollIntoView({ block: "start" });
+  await runAsk({ question, about: null, button: $("chat-submit"), out, quotaEl: $("chat-quota") });
+  bubble.scrollIntoView({ block: "start" });
+}
+
+function growChatInput() {
+  chatInput.style.height = "auto";
+  chatInput.style.height = `${Math.min(chatInput.scrollHeight + 2, 128)}px`;
+}
+
 $("chat-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const question = $("chat-input").value.trim();
-  if (question) runAsk({ question, about: null, button: $("chat-submit"), out: $("chat-answer"), quotaEl: $("chat-quota") });
+  const question = chatInput.value.trim();
+  if (question) askInChat(question);
 });
+chatInput.addEventListener("input", growChatInput);
+chatInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    $("chat-form").requestSubmit();
+  }
+});
+
+/** Wide screens keep the chat open beside the page; narrower ones open it as a modal from the header icon. */
+function placeChat() {
+  const modal = chatDialog.open && chatDialog.matches(":modal");
+  if (chatDocked.matches) {
+    if (modal) chatDialog.close();
+    if (!chatDialog.open) {
+      chatDialog.show();
+      chatInput.blur();   // opening it beside the page must not take the keyboard
+    }
+  } else if (chatDialog.open && !modal) {
+    chatDialog.close();
+  }
+}
+
+$("chat-open").addEventListener("click", () => {
+  if (!chatDialog.open) chatDialog.showModal();
+  chatInput.focus();
+});
+$("chat-close").addEventListener("click", () => chatDialog.close());
+chatDialog.addEventListener("click", (event) => {
+  if (event.target === chatDialog && chatDialog.matches(":modal")) chatDialog.close();   // a click on the dimmed area
+});
+chatDocked.addEventListener("change", placeChat);
 
 // --- the story pop-up ----------------------------------------------------------------------
 
@@ -973,7 +1049,7 @@ function renderAccount(session) {
   }
   $("login-password").value = "";
   $("chat-quota").textContent = "";
-  setContent($("chat-answer"));
+  resetChat();
   $("chat-scope").textContent = signedIn
     ? "Her gün 10 soru sorabilirsin."
     : "Misafir olarak günde 1 soru sorabilirsin. Daha fazlası için giriş yap.";
@@ -1021,6 +1097,10 @@ document.addEventListener("visibilitychange", async () => {
 });
 
 $("sd-close").replaceChildren(glyph("close"));
+$("chat-close").replaceChildren(glyph("close"));
+$("chat-open").replaceChildren(glyph("chat"));
+$("chat-submit").replaceChildren(glyph("send"));
+placeChat();
 $("pd-close").replaceChildren(glyph("close"));
 $("prefs-open").replaceChildren(glyph("sliders"), "Sana göre");
 // --- light or dark: follows the system until the reader picks one, then remembers the choice ---------

@@ -29,6 +29,7 @@
     </div>
     <div class="tools">
       <p class="pulse" id="pulse" role="status">Güncelleme durumu kontrol ediliyor…</p>
+      <button type="button" class="theme-btn" id="chat-open" aria-label="Haberlere soru sor" title="Haberlere soru sor" aria-haspopup="dialog"></button>
       <button type="button" class="theme-btn" id="theme-btn" aria-label="Koyu temaya geç" title="Tema">
         <svg class="ico moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8 8 0 0 1 9.8 4a8 8 0 1 0 10.2 10.2z"/></svg>
         <svg class="ico sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>
@@ -85,21 +86,6 @@
 
       <div class="topics" id="topics" role="group" aria-label="Konuya göre süz" hidden></div>
       <div id="summary" aria-live="polite"></div>
-
-      <section id="chat">
-        <h2>Haberlere soru sor</h2>
-        <p class="muted" id="chat-scope"></p>
-        <form id="chat-form">
-          <label>
-            <span class="sr-only">Sorun</span>
-            <textarea id="chat-input" rows="2" maxlength="300" required autocomplete="off"
-                      placeholder="Örnek: Merkez Bankası faiz kararı ne oldu…"></textarea>
-          </label>
-          <button type="submit" id="chat-submit" class="btn light">Sor</button>
-        </form>
-        <p id="chat-quota"></p>
-        <div id="chat-answer" aria-live="polite"></div>
-      </section>
     </main>
   </div>
 
@@ -107,6 +93,28 @@
     <p>Özetleri yapay zekâ yazar ve hatalı olabilir; ayrıntı için kaynağa git. İngilizce kaynakların özetleri Türkçeye çevrilmiştir ve “EN” ile işaretlidir. Bir haberin penceresinden sorarsan önce haberin sayfası okunur, sonra son 3 günün haberlerine ve gerekirse internete bakılır; genel sohbet yalnızca son 3 günün haberlerini kapsar.</p>
     <p>Sorular, haber başlıkları ve okunan haber metinleri Google Gemini’ye (ücretsiz katman) gönderilir; Google bu içeriği ürünlerini geliştirmek için kullanabilir. Hangi haberleri açtığın yalnızca bu tarayıcıda saklanır.</p>
   </footer>
+
+  <!-- The chat: docked on the right of wide screens, a pop-up (opened from the header) everywhere else. -->
+  <dialog id="chat" aria-labelledby="chat-title">
+    <section class="chat-panel">
+      <header class="chat-head">
+        <div>
+          <h2 id="chat-title">Haberlere soru sor</h2>
+          <p class="muted" id="chat-scope"></p>
+        </div>
+        <button class="icon-btn" id="chat-close" type="button" aria-label="Kapat"></button>
+      </header>
+      <div class="chat-log" id="chat-answer" aria-live="polite"></div>
+      <form class="chat-form" id="chat-form">
+        <label>
+          <span class="sr-only">Sorun</span>
+          <textarea id="chat-input" rows="1" maxlength="300" required autocomplete="off" placeholder="Bir haber sor…"></textarea>
+        </label>
+        <button type="submit" id="chat-submit" class="send-btn" aria-label="Sor"></button>
+      </form>
+      <p id="chat-quota"></p>
+    </section>
+  </dialog>
 
   <!-- A story opens here. Native <dialog>: focus stays inside, Esc closes it. -->
   <dialog id="story-dialog" aria-labelledby="sd-headline">
