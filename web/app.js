@@ -90,6 +90,20 @@ function relativeTime(iso) {
   return relative.format(-Math.round(hours / 24), "day");
 }
 
+const FRESH_MINUTES = 60;
+const isFresh = (item) => Date.now() - new Date(item.published_at).getTime() < FRESH_MINUTES * 60000;
+/** The outlets that carry a story: its own source and the others that reported the same event. */
+const outletNames = (item) => [...new Set([item.source, ...item.also.filter((a) => a.link).map((a) => a.source)])];
+
+/** "12 haber · en yenisi 8 dakika önce · son 1 saatte 3 yeni": the freshness of a section at a glance. */
+function freshnessLine(items) {
+  const newest = Math.max(...items.map((i) => new Date(i.published_at).getTime()));
+  const fresh = items.filter(isFresh).length;
+  const parts = [`${items.length} haber`, `en yenisi ${relativeTime(new Date(newest).toISOString())}`];
+  if (fresh) parts.push(`son 1 saatte ${fresh} yeni`);
+  return parts.join(" · ");
+}
+
 const cap = (text) => text.charAt(0).toLocaleUpperCase("tr") + text.slice(1);
 const isCatchAll = (topic) => topic.startsWith("diğer");
 
@@ -269,6 +283,9 @@ function storyNode(item, index, { lead = false, compact = false } = {}) {
 
   const meta = h("p", { class: "meta" }, h("span", { class: "src" }, item.source));
   meta.append(h("time", { datetime: item.published_at, title: formatDateTime(item.published_at) }, relativeTime(item.published_at)));
+  if (isFresh(item)) meta.append(h("span", { class: "chip fresh", title: "Son bir saat içinde yayımlandı" }, "Yeni"));
+  const outlets = outletNames(item);
+  if (outlets.length > 1) meta.append(h("span", { class: "chip", title: outlets.join(", ") }, `${outlets.length} kaynak`));
   if (item.language === "en") meta.append(h("span", { class: "chip", title: "İngilizce kaynak, Türkçeye özetlendi" }, "EN"));
   if (!isCatchAll(item.topic)) meta.append(h("span", { class: "chip topic-chip" }, cap(item.topic)));
   meta.append(sourceLink(item, "Kaynağa git"));
@@ -516,10 +533,13 @@ function renderSection() {
   if (!row || row.mode === "empty" || !row.items.length) {
     $("topics").hidden = true;
     $("suggestion").hidden = true;
+    $("section-fresh").hidden = true;
     setContent(box, h("p", { class: "note" }, "Bu bölümde şu an gösterilecek haber yok. Haberler saat başı yenileniyor."));
     return;
   }
   const items = row.items;
+  $("section-fresh").textContent = freshnessLine(items);
+  $("section-fresh").hidden = false;
   renderTopics(items);
   renderSuggestion();
 
@@ -563,6 +583,7 @@ async function goSection(id, { openId = null, push = false } = {}) {
   setGlyph($("section-glyph"), id);
   $("section-title").textContent = SECTION[id].label;
   $("section-blurb").textContent = SECTION[id].blurb;
+  $("section-fresh").hidden = true;
   renderRail();
   $("suggestion").hidden = true;
   $("topics").hidden = true;
@@ -608,7 +629,7 @@ function markRead(link) {
 
 /** Sends a question and returns { status, data }. From a story's pop-up the story's link goes along and
  *  the server streams what it is doing (one JSON object per line); `onStatus` receives each step. */
-async function askServer(question, about = null, onStatus = () => {}) {
+async function askServer(question, about = null, onStatus = () => {}, previous = null) {
   const headers = { "Content-Type": "application/json" };
   const token = await accessToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -616,7 +637,7 @@ async function askServer(question, about = null, onStatus = () => {}) {
   const giveUp = setTimeout(() => controller.abort(), about ? 70000 : 30000);
   try {
     const response = await fetch(ASK_URL, { method: "POST", headers, signal: controller.signal,
-      body: JSON.stringify(about ? { question, about, stream: true } : { question }) });
+      body: JSON.stringify(about ? { question, about, stream: true } : previous ? { question, previous } : { question }) });
     if (!(response.headers.get("content-type") ?? "").includes("ndjson")) {
       return { status: response.status, data: await response.json().catch(() => ({})) };
     }
@@ -714,14 +735,14 @@ function answerNode(data) {
 }
 
 /** Shared by the chat box and the story pop-up. While the server works, each step it reports is listed. */
-async function runAsk({ question, about, button, out, quotaEl }) {
+async function runAsk({ question, about, button, out, quotaEl, previous = null }) {
   button.disabled = true;
   const steps = h("ol", { class: "steps", "aria-live": "polite" });
   const addStep = (text) => steps.append(h("li", {}, text));
   addStep(about ? "Sorun alındı…" : "Haberlerde aranıyor…");
   setContent(out, steps);
   try {
-    const { status, data } = await askServer(question, about, addStep);
+    const { status, data } = await askServer(question, about, addStep, previous);
     if (data.quota) quotaEl.textContent = quotaText(data.quota, data.scope);
     if (status === 200) {
       setContent(out, answerNode(data));
@@ -763,7 +784,10 @@ function chatIntro() {
   return box;
 }
 
+let lastQuestion = null;   // sent along with the next question, so a short follow-up has a subject
+
 function resetChat() {
+  lastQuestion = null;
   setContent(chatLog, chatIntro());
 }
 
@@ -776,7 +800,9 @@ async function askInChat(question) {
   chatInput.value = "";
   growChatInput();
   bubble.scrollIntoView({ block: "start" });
-  await runAsk({ question, about: null, button: $("chat-submit"), out, quotaEl: $("chat-quota") });
+  const previous = lastQuestion;
+  lastQuestion = question;
+  await runAsk({ question, about: null, button: $("chat-submit"), out, quotaEl: $("chat-quota"), previous });
   bubble.scrollIntoView({ block: "start" });
 }
 

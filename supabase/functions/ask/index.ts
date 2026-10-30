@@ -141,7 +141,7 @@ async function keywordArticles(terms: string[], sinceHours: number | null): Prom
   return (rows ?? []).map((r: Article & { hits: number }) => ({ ...r, similarity: 0, hits: r.hits }));
 }
 
-function buildPrompt(question: string, articles: Article[], aboutTitle: string | null): string {
+function buildPrompt(question: string, articles: Article[], aboutTitle: string | null, previous: string | null): string {
   const list = articles
     .map((a, i) => `[${i + 1}] ${a.title}\n${(a.summary ?? "").slice(0, 400)}`)
     .join("\n\n");
@@ -171,6 +171,10 @@ function buildPrompt(question: string, articles: Article[], aboutTitle: string |
       ? [`The user is reading the story "${aboutTitle}" and the question is about it. Answer about that story,`,
          "using other candidates only when they report the same event or add closely related facts.", ""]
       : []),
+    ...(previous
+      ? [`The user's previous question was: "${previous}". The current question is a short follow-up, so read it`,
+         "in the context of that question, and answer only the current one.", ""]
+      : []),
     `Question: ${question}`,
     "",
     "Candidates:",
@@ -197,8 +201,8 @@ const RESPONSE_SCHEMA = {
   required: ["items", "asked"],
 };
 
-async function generate(question: string, articles: Article[], aboutTitle: string | null) {
-  const prompt = buildPrompt(question, articles, aboutTitle);
+async function generate(question: string, articles: Article[], aboutTitle: string | null, previous: string | null) {
+  const prompt = buildPrompt(question, articles, aboutTitle, previous);
   let lastError: unknown = new Error("no model configured");
   for (const model of GEN_MODELS) {
     try {
@@ -410,6 +414,11 @@ Deno.serve(async (req) => {
   if (!question || question.length > MAX_QUESTION_CHARS) {
     return json(req, { error: `question must be 1-${MAX_QUESTION_CHARS} characters` }, 400);
   }
+  // The reader's previous question, kept by the page so a short follow-up ("peki ya faiz?") has a subject.
+  // It is used only when the new question names too little on its own, so an unrelated question is not
+  // pulled toward the old topic.
+  const previousQuestion = typeof body.previous === "string" ? body.previous.trim().slice(0, MAX_QUESTION_CHARS) : "";
+  const followUp = previousQuestion !== "" && topicTerms(question).length < 2 ? previousQuestion : null;
   const sinceHours = typeof body.since_hours === "number" ? body.since_hours : null;
   const aboutLink = typeof body.about === "string" && /^https?:\/\//.test(body.about) && body.about.length <= 600
     ? body.about : null;
@@ -467,13 +476,13 @@ Deno.serve(async (req) => {
   /** Titles and one-sentence summaries from the three-day archive (the path every question can take). */
   async function archiveAnswer(aboutArticle: Article | null): Promise<Record<string, unknown>> {
     let t = performance.now();
-    const vec = await embedQuestion((aboutArticle ? `${aboutArticle.title}. ${question}` : question).slice(0, 600));
+    const vec = await embedQuestion((aboutArticle ? `${aboutArticle.title}. ${question}` : followUp ? `${followUp}. ${question}` : question).slice(0, 600));
     geminiRequests++;
     lap("embed_ms", t);
 
     t = performance.now();
     const vectorHits = await matchArticles(vec, sinceHours);
-    const terms = topicTerms(aboutArticle ? `${aboutArticle.title} ${question}` : question);
+    const terms = topicTerms(aboutArticle ? `${aboutArticle.title} ${question}` : followUp ? `${question} ${followUp}` : question);
     const keywordHits = await keywordArticles(terms, sinceHours);
     // Keyword hits first (they include articles that have no embedding yet), then the vector neighbours.
     const merged = new Map<string, Article>();
@@ -486,7 +495,7 @@ Deno.serve(async (req) => {
     let result;
     try {
       geminiRequests++;
-      result = await generate(question, articles, aboutArticle?.title ?? null);
+      result = await generate(question, articles, aboutArticle?.title ?? null, followUp);
     } catch (e) {
       lap("generate_ms", t);
       await giveBack();

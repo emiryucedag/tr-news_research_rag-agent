@@ -158,6 +158,8 @@ svg { display: block; flex: none; }
 .section-head h2 { margin: 0; font: 600 clamp(2.1rem, 6vw, 3.5rem)/1.07 var(--display); letter-spacing: -0.03em; }
 .section-blurb { margin: 4px 0 0; color: var(--soft); font-size: 1.0625rem; }
 
+.section-fresh { margin: 6px 0 0; font-size: 0.875rem; color: var(--soft); font-variant-numeric: tabular-nums; }
+
 .topics { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 0; }
 .topic { min-height: 40px; padding: 0 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); font-size: 0.875rem; letter-spacing: -0.016em; }
 .topic:hover { border-color: var(--soft); }
@@ -196,6 +198,7 @@ svg { display: block; flex: none; }
 .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: auto 0 0; padding-top: 16px; font-size: 0.875rem; color: var(--soft); letter-spacing: -0.016em; }
 .src { font-weight: 600; color: var(--ink); }
 .chip { padding: 1px 9px; border-radius: 999px; background: var(--sunk); color: var(--soft); font-size: 0.75rem; letter-spacing: 0; }
+.chip.fresh { background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand); font-weight: 600; }
 .ext { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 5px; color: var(--brand); text-decoration: none; }
 .ext:hover { text-decoration: underline; }
 .ext svg { width: 13px; height: 13px; }
