@@ -175,8 +175,9 @@ def vector_literal(vec):
 
 # --- Gemini generation ------------------------------------------------------
 
-# Primary first, then a second model with its own free-tier quota.
-GENERATION_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+# Primary first, then models with their own free-tier quota: each model has a separate daily limit, so the
+# later ones keep the site working on the days the first two run out.
+GENERATION_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-3-flash-preview"]
 
 
 class GenerationError(Exception):

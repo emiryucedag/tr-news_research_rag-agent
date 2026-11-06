@@ -1,5 +1,7 @@
 # Tr News Agent
 
+**Live site: https://emiryucedag.github.io/tr-news_research_rag-agent/**
+
 A news digest and question-answering system for Turkish readers. Every hour it collects stories from 42
 Turkish and English feeds, reads the articles, and publishes short, source-linked summaries in eight
 sections. Readers can ask questions about a story or about the news in general and get answers that name

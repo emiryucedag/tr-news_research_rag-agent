@@ -15,7 +15,7 @@ const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
 const EMBED_MODEL = "gemini-embedding-001";
 const EMBED_DIMS = 768;
 // Primary model first, then a second one with its own free-tier quota if the first fails.
-const GEN_MODELS = [...new Set([Deno.env.get("GEN_MODEL") ?? "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"])];
+const GEN_MODELS = [...new Set([Deno.env.get("GEN_MODEL") ?? "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-3-flash-preview"])];
 const EMBED_TIMEOUT_MS = 8000;
 const GENERATE_TIMEOUT_MS = 10000; // per model
 const CANDIDATES = 14;
