@@ -677,10 +677,10 @@ async function askServer(question, about = null, onStatus = () => {}, previous =
   const token = await accessToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   const controller = new AbortController();
-  const giveUp = setTimeout(() => controller.abort(), about ? 70000 : 30000);
+  const giveUp = setTimeout(() => controller.abort(), 70000);
   try {
     const response = await fetch(ASK_URL, { method: "POST", headers, signal: controller.signal,
-      body: JSON.stringify(about ? { question, about, stream: true } : previous ? { question, previous } : { question }) });
+      body: JSON.stringify({ question, stream: true, ...(about ? { about } : {}), ...(previous ? { previous } : {}) }) });
     if (!(response.headers.get("content-type") ?? "").includes("ndjson")) {
       return { status: response.status, data: await response.json().catch(() => ({})) };
     }
@@ -737,8 +737,10 @@ function answerNode(data) {
     const web = data.web === "searched"
       ? "İnternette bulduğum sayfalarda da yanıt yoktu."
       : "İnternet aramasından da sonuç alamadım (arama hizmeti yanıt vermemiş olabilir).";
-    const box = h("div", { class: "answer" },
-      h("p", { class: "note" }, `Bu ayrıntıyı haberin metninde ve son 3 günün haberlerinde bulamadım. ${web} Haberin tamamı için kaynağa gidebilirsin.`));
+    const lead = data.general
+      ? `Bunu son 3 günün haberlerinde bulamadım. ${web}`
+      : `Bu ayrıntıyı haberin metninde ve son 3 günün haberlerinde bulamadım. ${web} Haberin tamamı için kaynağa gidebilirsin.`;
+    const box = h("div", { class: "answer" }, h("p", { class: "note" }, lead));
     if ((data.items ?? []).length) {
       box.append(h("p", { class: "note" }, "Konuya yakın haberler:"));
       const list = h("ol", { class: "sources" });

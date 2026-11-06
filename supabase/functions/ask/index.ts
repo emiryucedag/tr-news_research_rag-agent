@@ -343,8 +343,9 @@ type Source = { title: string; source: string; link: string };
 async function answerFromTexts(
   question: string,
   texts: { title: string; text: string; source: Source; language: string }[],
+  perText = 2500,
 ): Promise<{ answer: string; sources: Source[]; model: string } | null> {
-  const blocks = texts.map((t, i) => `[${i + 1}] ${t.title}\n${t.text.slice(0, 2500)}`).join("\n\n");
+  const blocks = texts.map((t, i) => `[${i + 1}] ${t.title}\n${t.text.slice(0, perText)}`).join("\n\n");
   const prompt = [
     "A reader asks a question about a news story. Answer it using ONLY the numbered article texts below.",
     "Return {found, answer, used}. found is true only when the texts actually contain the answer.",
@@ -363,7 +364,7 @@ async function answerFromTexts(
     try {
       const data = await geminiPost(`${model}:generateContent`, {
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json", responseSchema: ANSWER_SCHEMA, temperature: 0 },
+        generationConfig: { responseMimeType: "application/json", responseSchema: ANSWER_SCHEMA, temperature: 0, ...thinkingOff(model) },
       }, ANSWER_TIMEOUT_MS);
       const parts = data.candidates?.[0]?.content?.parts ?? [];
       const raw = parts.filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text ?? "").join("");
@@ -410,6 +411,39 @@ async function webSearch(title: string, ownLink: string): Promise<Source[]> {
   }
 }
 
+/** Real web search for questions the archive cannot answer (Tavily, free tier, key in TAVILY_API_KEY). Returns the
+ *  result snippets as texts. Without a key, or when it fails, it returns nothing and the caller says so. */
+const TAVILY_KEY = Deno.env.get("TAVILY_API_KEY") ?? "";
+async function tavilySearch(query: string): Promise<{ title: string; text: string; source: Source; language: string }[]> {
+  if (!TAVILY_KEY) return [];
+  try {
+    const r = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${TAVILY_KEY}` },
+      body: JSON.stringify({ query, search_depth: "basic", max_results: 6, include_answer: false, include_raw_content: "text" }),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!r.ok) return [];
+    const data = await r.json().catch(() => ({}));
+    const out = [];
+    for (const x of data.results ?? []) {
+      if (!x?.url || !x?.content || !/^https?:\/\//.test(x.url)) continue;
+      const host = new URL(x.url).hostname.replace(/^www\./, "");
+      // The full page text when there is one: a snippet holds only a few rows of a table.
+      const text = String(x.raw_content && String(x.raw_content).length > String(x.content).length ? x.raw_content : x.content).slice(0, 9000);
+      out.push({
+        title: String(x.title ?? host).slice(0, 160),
+        text,
+        source: { title: String(x.title ?? host).slice(0, 160), source: host, link: x.url },
+        language: /[çğıöşüÇĞİÖŞÜ]/.test(text) ? "tr" : "en",
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 // --- handler ------------------------------------------------------------------
 
 Deno.serve(async (req) => {
@@ -431,7 +465,7 @@ Deno.serve(async (req) => {
     ? body.about : null;
   // A question about one story streams its progress (one JSON object per line); other questions
   // get a single JSON answer as before.
-  const streaming = body.stream === true && aboutLink !== null;
+  const streaming = body.stream === true;
 
   const t0 = performance.now(); // total_ms covers everything below, including login and quota checks
   const timings: Record<string, number> = {};
@@ -616,16 +650,39 @@ Deno.serve(async (req) => {
     return { ...archive, mode: "not_found", web: "searched" };
   }
 
+  /** A general question: the archive first; when it has nothing, the web, with each step reported. */
+  async function generalAnswer(say: (text: string) => void): Promise<Record<string, unknown>> {
+    const archive = await archiveAnswer(null);
+    const items = (archive.items ?? []) as unknown[];
+    // An archive answer that says part of the question is not covered ("... yer almıyor") is not enough.
+    const complete = archive.mode === "answer" && items.length > 0 && !archive.not_covered;
+    if (complete) return { ...archive, origin: "archive" };
+    if (archive.mode === "fallback") return archive; // the model itself is out: searching the web would fail the same way
+
+    say("Haberlerde bulamadım. İnternette arıyorum…");
+    const t = performance.now();
+    const texts = await tavilySearch(followUp ? `${followUp} ${question}` : question);
+    lap("web_search_ms", t);
+    const partial = archive.mode === "answer" && items.length > 0; // the archive had something, just not the asked part
+    if (texts.length === 0) return partial ? { ...archive, origin: "archive" } : { ...archive, mode: "not_found", web: "none", general: true };
+    say("Bulunan sayfaları okuyorum…");
+    geminiRequests++;
+    const hit = await answerFromTexts(followUp ? `${followUp} ${question}` : question, texts.slice(0, 4), 6000);
+    if (hit) return { mode: "text", origin: "web", answer: hit.answer, sources: hit.sources, model: hit.model };
+    return partial ? { ...archive, origin: "archive" } : { ...archive, mode: "not_found", web: "searched", general: true };
+  }
+
   try {
     const story = await lookupStory();
 
-    if (streaming && story) {
+    if (streaming && (story || aboutLink === null)) {
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
         async start(controller) {
           const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
           try {
-            const result = await aboutAnswer(story, (text) => send({ type: "status", text }));
+            const say = (text: string) => send({ type: "status", text });
+            const result = story ? await aboutAnswer(story, say) : await generalAnswer(say);
             if (result.mode === "empty" || result.mode === "not_found") await giveBack();
             lap("total_ms", t0);
             send({ type: "result", ...payloadOf(result) });
