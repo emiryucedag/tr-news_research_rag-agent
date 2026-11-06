@@ -6,7 +6,7 @@ on:
     # with one run an hour it fired only twice in about ten hours on the first day. The job is safe to
     # repeat (articles are matched by id, unchanged sections are skipped), so more tries just make a
     # missed one less likely to matter.
-    - cron: "11,31,51 * * * *"
+    - cron: "11,41 * * * *"
   workflow_dispatch:
 
 # Never run two ingestions at once: they share the embedding budget.

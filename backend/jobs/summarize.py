@@ -44,7 +44,7 @@ OFF_TOPIC = "bu bölüme uymuyor"  # the model must say so when a story does not
 NO_BODY_SOURCES = {f["source"] for f in FEEDS if f["terms"] in ("restrictive", "personal-only")}
 MAX_BODY_FOR_PROMPT = 2500   # characters of one article given to the model
 MIN_GAIN = 150               # a fetched text must be this much longer than the teaser to count
-CANDIDATE_COLUMNS = "id,title,summary,link,source,language,published_at"
+CANDIDATE_COLUMNS = "id,title,summary,link,source,language,published_at,category"
 
 
 def schema_for(category):
@@ -156,9 +156,14 @@ def story_dict(article, headline, sentence, detail, topic, also):
     }
 
 
-def plain_items(candidates):
+def plain_items(candidates, category=None):
     """Last resort when the model path fails: plain titles, nothing generated. Titles are kept in
-    this mode only, because they are all there is to show."""
+    this mode only, because they are all there is to show. Only the section's own stories are shown:
+    candidates borrowed from the general feeds were never checked against the section's subject."""
+    if category:
+        candidates = [a for a in candidates if a.get("category", category) == category]
+    # Untranslated English headlines would show up in a Turkish page: only Turkish stories are listed here.
+    candidates = [a for a in candidates if a.get("language", "tr") == "tr"]
     items = []
     for a in candidates[:8]:
         story = story_dict(a, a["title"], a["title"], "", "diğer", [])
@@ -367,7 +372,7 @@ def summarize(candidates, category):
             return "summary", stories, model, dropped
         errors.append(f"{model} selected nothing usable")
     print("    model path failed:", "; ".join(errors))
-    return "fallback", plain_items(candidates), None, {}
+    return "fallback", plain_items(candidates, category), None, {}
 
 
 def main():
@@ -379,7 +384,7 @@ def main():
     db = Supabase()
     now = datetime.now(timezone.utc)
     since = (now - timedelta(hours=WINDOW_HOURS)).isoformat()
-    stored = {r["category"]: r for r in db.select("category_summaries", {"select": "category,fingerprint,items"})}
+    stored = {r["category"]: r for r in db.select("category_summaries", {"select": "category,fingerprint,items,mode"})}
 
     failed = []
     for category in ([args.only] if args.only else CATEGORIES):
@@ -479,11 +484,19 @@ def process_category(db, category, since, now, stored, force):
 
     if not candidates:
         mode, items, model, dropped = "empty", [], None, {}
-    elif not force and stored.get(category, {}).get("fingerprint") == fingerprint:
+    elif not force and stored.get(category, {}).get("fingerprint") == fingerprint \
+            and stored.get(category, {}).get("mode") != "fallback":
+        # A section left in the plain-titles fallback is tried again on every run, so it recovers by itself
+        # when the model quota comes back; the same stories alone are not a reason to skip it.
         print(f"{category:15} unchanged, skipped")
         return
     else:
         mode, items, model, dropped = summarize(candidates, category)
+        previous = stored.get(category, {})
+        if mode == "fallback" and previous.get("mode") == "summary" and previous.get("items"):
+            # The model is out of quota or down: a real earlier summary is better than plain titles.
+            print(f"{category:15} model path failed, kept the previous summary")
+            return
         if mode == "summary":
             items, dropped["read"], dropped["rewritten"] = write_from_articles(
                 items, candidates, stored.get(category, {}).get("items") or [])
