@@ -20,14 +20,14 @@ const SECTION = Object.fromEntries(SECTIONS.map((s) => [s.id, s]));
 
 // Section marks, drawn for this site: simple geometric shapes, one per section, no emoji.
 const GLYPHS = {
-  gundem: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/>',
-  siyaset: '<path d="M3.5 20.5h17M6 20.5V10.5M10 20.5V10.5M14 20.5V10.5M18 20.5V10.5M3.5 10.5 12 4l8.5 6.5"/>',
-  spor: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V9M9.5 3h5M18 6.5l1.6-1.6"/>',
-  ekonomi: '<path d="M5.5 20.5v-6M12 20.5V8.5M18.5 20.5V4M3 20.5h18"/>',
-  teknoloji: '<rect x="7" y="7" width="10" height="10" rx="1.6"/><path d="M10 3.5v3.5M14 3.5v3.5M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"/>',
-  dunya: '<circle cx="12" cy="12" r="8.5"/><ellipse cx="12" cy="12" rx="3.8" ry="8.5"/><path d="M3.5 12h17"/>',
-  "yapay-zeka": '<circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="7" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M8.2 7h7.6M7.2 9l3.8 7M16.8 9l-3.8 7"/>',
-  "populer-kultur": '<rect x="3.5" y="5" width="17" height="14" rx="2.4"/><path d="M10.2 9.4v5.2l4.4-2.6z" fill="currentColor"/>',
+  gundem: '<path d="M13.5 3 6.5 13.2h5L10.5 21l7-10.2h-5z"/>',
+  siyaset: '<path d="M4 20.5h16M8 20.5v-10M16 20.5v-10M4 10.5 12 5l8 5.5"/>',
+  spor: '<path d="M18.06 10A7 7 0 1 1 15.5 7.44M12 13.5V10M10 3.5h4"/>',
+  ekonomi: '<path d="M4 18c5 0 6-4 9-7s4-4 7-5M15 6h5v5"/>',
+  teknoloji: '<rect x="5" y="5" width="14" height="14" rx="3.2"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>',
+  dunya: '<circle cx="12" cy="12" r="8.5"/><path d="M3.8 12.2c3 3 5.6 3 8.2 0s5.2-3 8.2 0"/>',
+  "yapay-zeka": '<circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>',
+  "populer-kultur": '<path d="m12 4 2.5 5.2 5.5.8-4 4 1 5.6-5-2.7-5 2.7 1-5.6-4-4 5.5-.8z"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   pause: '<path d="M9 5v14M15 5v14"/>',
   play: '<path d="M8 5l11 7-11 7z"/>',
@@ -209,9 +209,6 @@ function normalise(item) {
   };
 }
 
-// Sections that also draw candidates from the general "gundem" feeds (see CATEGORY_EXTRA_SOURCES in the backend).
-const BORROWS = new Set(["siyaset", "spor", "ekonomi", "dunya"]);
-
 async function loadSection(id, { force = false } = {}) {
   const hit = cache.get(id);
   if (hit && !force && Date.now() - hit.at < CACHE_MS) return hit.row;
@@ -223,9 +220,9 @@ async function loadSection(id, { force = false } = {}) {
   if (error) throw error;
   let items = (data?.items ?? []).map(normalise);
   if (data?.mode === "fallback") {
-    // The plain-titles fallback is only kept for a section's own Turkish stories. Rows stored before that rule may hold
-    // stories borrowed from another section (sections that draw on the general feeds) and untranslated English headlines.
-    items = BORROWS.has(id) ? [] : items.filter((item) => item.language !== "en");
+    // The job now stores only a section's own Turkish stories in this mode; this drops any untranslated English
+    // headline left in an older row.
+    items = items.filter((item) => item.language !== "en");
   }
   const row = data && { ...data, items };
   if (row) cache.set(id, { row, at: Date.now() });
