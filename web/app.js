@@ -20,13 +20,13 @@ const SECTION = Object.fromEntries(SECTIONS.map((s) => [s.id, s]));
 
 // Section marks, drawn for this site: simple geometric shapes, one per section, no emoji.
 const GLYPHS = {
-  gundem: '<path d="M13.5 3 6.5 13.2h5L10.5 21l7-10.2h-5z"/>',
+  gundem: '<path d="M5 5h11v14H7a2 2 0 0 1-2-2zM16 9h3v8a2 2 0 0 1-2 2M8 9h5M8 12.5h5M8 16h3"/>',
   siyaset: '<path d="M4 20.5h16M8 20.5v-10M16 20.5v-10M4 10.5 12 5l8 5.5"/>',
-  spor: '<path d="M18.06 10A7 7 0 1 1 15.5 7.44M12 13.5V10M10 3.5h4"/>',
-  ekonomi: '<path d="M4 18c5 0 6-4 9-7s4-4 7-5M15 6h5v5"/>',
+  spor: '<circle cx="12" cy="12" r="8.5"/><path d="M5.8 5.8Q10.6 12 5.8 18.2M18.2 5.8Q13.4 12 18.2 18.2"/>',
+  ekonomi: '<circle cx="12" cy="12" r="8.5"/><path d="M10.4 6.8v8.4a3 3 0 0 0 3 2.6M8 11.6l8-2.6M8 14.4l8-2.6"/>',
   teknoloji: '<rect x="5" y="5" width="14" height="14" rx="3.2"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>',
   dunya: '<circle cx="12" cy="12" r="8.5"/><path d="M3.8 12.2c3 3 5.6 3 8.2 0s5.2-3 8.2 0"/>',
-  "yapay-zeka": '<circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>',
+  "yapay-zeka": '<path d="M10 5.5 11.7 10 16.2 11.7 11.7 13.4 10 18 8.3 13.4 3.8 11.7 8.3 10z"/><path d="M18 3.8l.8 2.1 2.1.8-2.1.8-.8 2.1-.8-2.1-2.1-.8 2.1-.8zM17.5 15.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/>',
   "populer-kultur": '<path d="m12 4 2.5 5.2 5.5.8-4 4 1 5.6-5-2.7-5 2.7 1-5.6-4-4 5.5-.8z"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   pause: '<path d="M9 5v14M15 5v14"/>',

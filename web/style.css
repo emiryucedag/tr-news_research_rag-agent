@@ -41,19 +41,19 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #100F0D; --surface: #1A1815; --ink: #F2EDE2; --muted: #A29B8D;
+    --bg: #1B1916; --surface: #262320; --ink: #F2EDE2; --muted: #A29B8D;
     --line: rgb(242 237 226 / 0.14); --line-strong: rgb(242 237 226 / 0.5);
     --action: #FF6B4A; --on-action: #1A0A05; --focus: #7FA8FF; --warn: #F0B35C;
-    --lead-bg: #211D18; --lead-ink: #F2EDE2; --lead-muted: rgb(242 237 226 / 0.74); --lead-line: rgb(242 237 226 / 0.26);
+    --lead-bg: #3A3229; --lead-ink: #F2EDE2; --lead-muted: rgb(242 237 226 / 0.74); --lead-line: rgb(242 237 226 / 0.26);
     --gundem-accent: #8FB0F5; --siyaset-accent: #F28C95; --spor-accent: #7ED69B; --ekonomi-accent: #EDC04F;
     --teknoloji-accent: #7ECFDB; --dunya-accent: #B7A2F2; --yapay-zeka-accent: #F6A06B; --populer-kultur-accent: #F192C9;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #100F0D; --surface: #1A1815; --ink: #F2EDE2; --muted: #A29B8D;
+  --bg: #1B1916; --surface: #262320; --ink: #F2EDE2; --muted: #A29B8D;
   --line: rgb(242 237 226 / 0.14); --line-strong: rgb(242 237 226 / 0.5);
   --action: #FF6B4A; --on-action: #1A0A05; --focus: #7FA8FF; --warn: #F0B35C;
-  --lead-bg: #211D18; --lead-ink: #F2EDE2; --lead-muted: rgb(242 237 226 / 0.74); --lead-line: rgb(242 237 226 / 0.26);
+  --lead-bg: #3A3229; --lead-ink: #F2EDE2; --lead-muted: rgb(242 237 226 / 0.74); --lead-line: rgb(242 237 226 / 0.26);
   --gundem-accent: #8FB0F5; --siyaset-accent: #F28C95; --spor-accent: #7ED69B; --ekonomi-accent: #EDC04F;
   --teknoloji-accent: #7ECFDB; --dunya-accent: #B7A2F2; --yapay-zeka-accent: #F6A06B; --populer-kultur-accent: #F192C9;
 }
@@ -223,9 +223,9 @@ time, .count, .n, .pulse, #chat-quota, .deck-count { font-variant-numeric: tabul
 .lead a { text-decoration-color: var(--lead-line); }
 .lead.is-read .headline { color: var(--lead-muted); }
 .story.lead:has(.story-open:focus-visible) { outline-color: var(--focus); }
-:root[data-theme="dark"] .story.lead, :root:not([data-theme="light"]) .story.lead { }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .story.lead { border: 1px solid var(--line); } }
-:root[data-theme="dark"] .story.lead { border: 1px solid var(--line); }
+/* In the dark theme the lead panel is a warm, lighter slab tinted by the section colour, not a black hole. */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .story.lead { border: 1px solid var(--line); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 26%, #3A3229), #332C25 70%); } }
+:root[data-theme="dark"] .story.lead { border: 1px solid var(--line); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 26%, #3A3229), #332C25 70%); }
 
 /* the quick list beside the lead: numbered, no boxes */
 .stories { counter-reset: n 1; }
