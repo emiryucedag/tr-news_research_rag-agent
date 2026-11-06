@@ -201,6 +201,13 @@ const RESPONSE_SCHEMA = {
   required: ["items", "asked"],
 };
 
+// Picking stories needs no long reasoning, and the fuller models would otherwise spend the 10 seconds thinking.
+function thinkingOff(model: string) {
+  if (model.startsWith("gemini-2.5")) return { thinkingConfig: { thinkingBudget: 0 } };
+  if (model.startsWith("gemini-3-flash")) return { thinkingConfig: { thinkingLevel: "minimal" } };
+  return {};
+}
+
 async function generate(question: string, articles: Article[], aboutTitle: string | null, previous: string | null) {
   const prompt = buildPrompt(question, articles, aboutTitle, previous);
   let lastError: unknown = new Error("no model configured");
@@ -208,7 +215,7 @@ async function generate(question: string, articles: Article[], aboutTitle: strin
     try {
       const data = await geminiPost(`${model}:generateContent`, {
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, temperature: 0 },
+        generationConfig: { responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, temperature: 0, ...thinkingOff(model) },
       }, GENERATE_TIMEOUT_MS);
       const parts = data.candidates?.[0]?.content?.parts ?? [];
       const text = parts.filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text ?? "").join("");
