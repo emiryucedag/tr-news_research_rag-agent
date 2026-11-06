@@ -29,6 +29,8 @@ const GLYPHS = {
   "yapay-zeka": '<circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="7" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M8.2 7h7.6M7.2 9l3.8 7M16.8 9l-3.8 7"/>',
   "populer-kultur": '<rect x="3.5" y="5" width="17" height="14" rx="2.4"/><path d="M10.2 9.4v5.2l4.4-2.6z" fill="currentColor"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  pause: '<path d="M9 5v14M15 5v14"/>',
+  play: '<path d="M8 5l11 7-11 7z"/>',
   chat: '<path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8L6.5 20v-3.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z"/>',
   send: '<path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
@@ -207,6 +209,9 @@ function normalise(item) {
   };
 }
 
+// Sections that also draw candidates from the general "gundem" feeds (see CATEGORY_EXTRA_SOURCES in the backend).
+const BORROWS = new Set(["siyaset", "spor", "ekonomi", "dunya"]);
+
 async function loadSection(id, { force = false } = {}) {
   const hit = cache.get(id);
   if (hit && !force && Date.now() - hit.at < CACHE_MS) return hit.row;
@@ -216,7 +221,13 @@ async function loadSection(id, { force = false } = {}) {
     .eq("category", id)
     .maybeSingle();
   if (error) throw error;
-  const row = data && { ...data, items: (data.items ?? []).map(normalise) };
+  let items = (data?.items ?? []).map(normalise);
+  if (data?.mode === "fallback") {
+    // The plain-titles fallback is only kept for a section's own Turkish stories. Rows stored before that rule may hold
+    // stories borrowed from another section (sections that draw on the general feeds) and untranslated English headlines.
+    items = BORROWS.has(id) ? [] : items.filter((item) => item.language !== "en");
+  }
+  const row = data && { ...data, items };
   if (row) cache.set(id, { row, at: Date.now() });
   return row;
 }
@@ -345,9 +356,12 @@ function syncFlowButtons() {
 function storiesGrid(items, { withLead = true, key = "all" } = {}) {
   if (flow === "h" && deckAllowed()) return storiesDeck(items, key);
   const grid = h("div", { class: "stories reveal" });
+  // Each story takes a place on the page: the lead, the quick list beside it, the middle columns, the dense rows.
   items.forEach((item, i) => {
     if (i === 8) grid.append(h("h3", { class: "more-title" }, "Daha fazla haber"));
-    grid.append(storyNode(item, i, { lead: withLead && i === 0, compact: i >= 8 }));
+    const node = storyNode(item, i, { lead: withLead && i === 0, compact: i >= 8 });
+    node.dataset.slot = withLead && i === 0 ? "lead" : withLead && i <= 3 ? "side" : i < 8 ? "mid" : "row";
+    grid.append(node);
   });
   return grid;
 }
@@ -526,6 +540,33 @@ function renderSuggestion() {
   box.hidden = false;
 }
 
+// --- the ticker: the newest headlines of the open section -----------------------------------------
+
+function renderTicker(items) {
+  const bar = $("ticker");
+  const newest = [...items].sort((x, y) => new Date(y.published_at) - new Date(x.published_at)).slice(0, 8);
+  if (!newest.length) { bar.hidden = true; return; }
+  const makeSet = (copy) => {
+    const set = h("div", { class: "ticker-set" });
+    if (copy) { set.setAttribute("aria-hidden", "true"); set.inert = true; }
+    for (const item of newest) {
+      const button = h("button", { type: "button", class: "ticker-item" }, item.headline);
+      button.addEventListener("click", () => openStory(item, current));
+      set.append(button);
+    }
+    return set;
+  };
+  setContent($("ticker-track"), makeSet(false), makeSet(true));
+  bar.hidden = false;
+}
+
+$("ticker-pause").addEventListener("click", () => {
+  const paused = $("ticker").classList.toggle("is-paused");
+  $("ticker-pause").setAttribute("aria-pressed", String(paused));
+  $("ticker-pause").setAttribute("aria-label", paused ? "Kayan başlıkları başlat" : "Kayan başlıkları durdur");
+  $("ticker-pause").replaceChildren(glyph(paused ? "play" : "pause"));
+});
+
 /** Draws the current section from currentRow, honouring the topic filter and pinned topics. */
 function renderSection() {
   const box = $("summary");
@@ -534,7 +575,11 @@ function renderSection() {
     $("topics").hidden = true;
     $("suggestion").hidden = true;
     $("section-fresh").hidden = true;
-    setContent(box, h("p", { class: "note" }, "Bu bölümde şu an gösterilecek haber yok. Haberler saat başı yenileniyor."));
+    $("ticker").hidden = true;
+    const waiting = row && row.mode === "fallback";
+    setContent(box, h("p", { class: "note" }, waiting
+      ? "Bu bölümün özetleri şu an hazırlanamıyor: yapay zekâ günlük kullanım sınırı doldu. Sınır yenilenince bölüm kendiliğinden dolacak."
+      : "Bu bölümde şu an gösterilecek haber yok. Haberler saat başı yenileniyor."));
     return;
   }
   const items = row.items;
@@ -542,6 +587,7 @@ function renderSection() {
   $("section-fresh").hidden = false;
   renderTopics(items);
   renderSuggestion();
+  renderTicker(items);
 
   const nodes = [];
   if (row.mode === "fallback") nodes.push(h("p", { class: "note" }, "Özet hazırlanamadı, son başlıklar gösteriliyor."));
@@ -577,7 +623,7 @@ async function goSection(id, { openId = null, push = false } = {}) {
   activeTopic = null;
   deckPositions.clear();
   document.body.dataset.section = id;
-  const paper = getComputedStyle(document.body).getPropertyValue("--paper").trim();
+  const paper = getComputedStyle(document.body).getPropertyValue("--bg").trim();
   document.querySelector('meta[name="theme-color"]').setAttribute("content", paper);
 
   setGlyph($("section-glyph"), id);
@@ -768,7 +814,6 @@ async function runAsk({ question, about, button, out, quotaEl, previous = null }
 const chatDialog = $("chat");
 const chatLog = $("chat-answer");
 const chatInput = $("chat-input");
-const chatDocked = window.matchMedia("(min-width: 90rem)");
 const CHAT_EXAMPLES = ["Merkez Bankası faiz kararı ne oldu?", "Bugün spor dünyasında neler oldu?", "Yapay zekâda son gelişmeler neler?"];
 
 /** The empty state: one line about what the chat reads, and a few questions to start from. */
@@ -824,29 +869,14 @@ chatInput.addEventListener("keydown", (event) => {
   }
 });
 
-/** Wide screens keep the chat open beside the page; narrower ones open it as a modal from the header icon. */
-function placeChat() {
-  const modal = chatDialog.open && chatDialog.matches(":modal");
-  if (chatDocked.matches) {
-    if (modal) chatDialog.close();
-    if (!chatDialog.open) {
-      chatDialog.show();
-      chatInput.blur();   // opening it beside the page must not take the keyboard
-    }
-  } else if (chatDialog.open && !modal) {
-    chatDialog.close();
-  }
-}
-
 $("chat-open").addEventListener("click", () => {
   if (!chatDialog.open) chatDialog.showModal();
   chatInput.focus();
 });
 $("chat-close").addEventListener("click", () => chatDialog.close());
 chatDialog.addEventListener("click", (event) => {
-  if (event.target === chatDialog && chatDialog.matches(":modal")) chatDialog.close();   // a click on the dimmed area
+  if (event.target === chatDialog) chatDialog.close();   // a click on the dimmed area
 });
-chatDocked.addEventListener("change", placeChat);
 
 // --- the story pop-up ----------------------------------------------------------------------
 
@@ -1124,9 +1154,8 @@ document.addEventListener("visibilitychange", async () => {
 
 $("sd-close").replaceChildren(glyph("close"));
 $("chat-close").replaceChildren(glyph("close"));
-$("chat-open").replaceChildren(glyph("chat"));
+$("chat-open").prepend(glyph("chat"));
 $("chat-submit").replaceChildren(glyph("send"));
-placeChat();
 $("pd-close").replaceChildren(glyph("close"));
 $("prefs-open").replaceChildren(glyph("sliders"), "Sana göre");
 // --- light or dark: follows the system until the reader picks one, then remembers the choice ---------
@@ -1137,7 +1166,7 @@ const effectiveTheme = () => document.documentElement.dataset.theme || (systemDa
 function syncTheme() {
   const dark = effectiveTheme() === "dark";
   $("theme-btn").setAttribute("aria-label", dark ? "Açık temaya geç" : "Koyu temaya geç");
-  const paper = getComputedStyle(document.body).getPropertyValue("--paper").trim();
+  const paper = getComputedStyle(document.body).getPropertyValue("--bg").trim();
   document.querySelector('meta[name="theme-color"]').setAttribute("content", paper);
 }
 
@@ -1160,6 +1189,8 @@ $("section-glyph").classList.add("ico");
 
 supabase.auth.onAuthStateChange((_event, session) => onSession(session));
 supabase.auth.getSession().then(({ data }) => onSession(data.session));
+$("dateline").textContent = new Intl.DateTimeFormat("tr-TR", { ...istanbul, weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
+$("ticker-pause").replaceChildren(glyph("pause"));
 refreshPulse();
 setInterval(refreshPulse, 5 * 60 * 1000);
 

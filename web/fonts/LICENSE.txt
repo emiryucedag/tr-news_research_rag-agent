@@ -1,7 +1,7 @@
 Fonts in this folder
 
-  Inter  Copyright The Inter Project Authors (https://github.com/rsms/inter).
-         Used on devices without Apple's system font; Apple devices use their own San Francisco.
+  Newsreader      Copyright 2020 The Newsreader Project Authors (https://github.com/productiontype/Newsreader).
+                  SIL Open Font License 1.1 (https://openfontlicense.org). Used for headlines.
 
-Inter is licensed under the SIL Open Font License, Version 1.1 (https://openfontlicense.org).
-The files are the variable latin and latin-ext subsets served by Google Fonts, unmodified.
+  Libre Franklin  Copyright 2015 The Libre Franklin Project Authors (https://github.com/impallari/Libre-Franklin).
+                  SIL Open Font License 1.1. Used for text, labels and buttons.

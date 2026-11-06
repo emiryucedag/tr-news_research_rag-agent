@@ -8,28 +8,32 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <meta name="description" content="Haber sitelerinde zaman kaybetmeden ne olup bittiğini öğren. Saat başı yenilenen, yapay zekâyla özetlenmiş Türkçe haberler.">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#FAFAF9">
-  <link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <meta name="theme-color" content="#F5F0E6">
+  <link rel="preload" href="fonts/libre-franklin-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/newsreader-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css?v=__V__">
 </head>
 <body data-section="gundem">
   <a class="skip-link" href="#content">İçeriğe geç</a>
 
+
   <header class="masthead">
     <div class="brand">
       <!-- The mark reads as a briefing: three lines of text and one signal dot. -->
       <svg class="mark" viewBox="0 0 36 36" aria-hidden="true">
-        <rect class="tile" width="36" height="36" rx="9"/>
-        <rect class="line" x="8" y="9" width="20" height="4" rx="2"/>
-        <rect class="line" x="8" y="16" width="20" height="4" rx="2"/>
-        <rect class="line" x="8" y="23" width="11" height="4" rx="2"/>
+        <rect class="tile" width="36" height="36" rx="8"/>
+        <rect class="line" x="8" y="9" width="20" height="4"/>
+        <rect class="line" x="8" y="16" width="20" height="4"/>
+        <rect class="line" x="8" y="23" width="11" height="4"/>
         <circle class="dot" cx="27" cy="25" r="3.2"/>
       </svg>
-      <h1 class="wordmark"><span>Tr</span> News Agent</h1>
+      <div class="brand-text">
+        <h1 class="wordmark"><span>Tr</span> News Agent</h1>
+        <p class="dateline" id="dateline"></p>
+      </div>
     </div>
     <div class="tools">
       <p class="pulse" id="pulse" role="status">Güncelleme durumu kontrol ediliyor…</p>
-      <button type="button" class="theme-btn" id="chat-open" aria-label="Haberlere soru sor" title="Haberlere soru sor" aria-haspopup="dialog"></button>
       <button type="button" class="theme-btn" id="theme-btn" aria-label="Koyu temaya geç" title="Tema">
         <svg class="ico moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8 8 0 0 1 9.8 4a8 8 0 1 0 10.2 10.2z"/></svg>
         <svg class="ico sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>
@@ -38,7 +42,7 @@
         <button type="button" id="flow-v" aria-pressed="true" aria-label="Dikey akış" title="Dikey akış"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4.5" width="16" height="6" rx="1.6"/><rect x="4" y="13.5" width="16" height="6" rx="1.6"/></svg></button>
         <button type="button" id="flow-h" aria-pressed="false" aria-label="Kart akışı, kaydırarak oku" title="Kart akışı (kaydır)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="7" width="12" height="13" rx="2"/><path d="M8.5 4h7"/></svg></button>
       </div>
-      <button class="text-btn" id="prefs-open" type="button" aria-haspopup="dialog"></button>
+      <button class="text-btn" id="prefs-open" type="button" title="Sana göre düzenleme" aria-haspopup="dialog"></button>
       <div id="account">
         <button id="login-toggle" type="button" class="text-btn" aria-expanded="false" aria-controls="login-panel">Giriş yap</button>
         <span id="account-email" hidden></span>
@@ -46,6 +50,13 @@
       </div>
     </div>
   </header>
+
+  <!-- The newest headlines of the open section; stops on hover, focus or the pause button. -->
+  <div class="ticker" id="ticker" hidden>
+    <span class="ticker-label">Şimdi</span>
+    <div class="ticker-view"><div class="ticker-track" id="ticker-track"></div></div>
+    <button type="button" class="ticker-pause" id="ticker-pause" aria-pressed="false" aria-label="Kayan başlıkları durdur" title="Durdur"></button>
+  </div>
 
   <div class="layout">
     <nav id="rail" aria-label="Bölümler"></nav>
@@ -95,7 +106,9 @@
     <p>Sorular, haber başlıkları ve okunan haber metinleri Google Gemini’ye (ücretsiz katman) gönderilir; Google bu içeriği ürünlerini geliştirmek için kullanabilir. Hangi haberleri açtığın yalnızca bu tarayıcıda saklanır.</p>
   </footer>
 
-  <!-- The chat: docked on the right of wide screens, a pop-up (opened from the header) everywhere else. -->
+  <!-- The chat: a button fixed at the bottom right that opens a pop-up, wherever the page is scrolled to. -->
+  <button type="button" class="fab" id="chat-open" aria-haspopup="dialog"><span>Haberlere soru sor</span></button>
+
   <dialog id="chat" aria-labelledby="chat-title">
     <section class="chat-panel">
       <header class="chat-head">
